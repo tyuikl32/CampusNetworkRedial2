@@ -114,6 +114,8 @@ end
 local ZAPRET_DIR   = "/opt/zapret"
 local ZAPRET_LIST  = ZAPRET_DIR .. "/ipset/zapret-hosts-user.txt"
 local ZAPRET_INIT  = "/etc/init.d/zapret"
+-- `zapret enable` 生成的启动软链：存在 = 开机自启。
+local ZAPRET_RC    = "/etc/rc.d/S21zapret"
 -- "停止"标记：存在时 /etc/firewall.zapret 不再安装 tpws 跳转。
 -- 放在 /var/run（tmpfs）——重启即失效，返回默认的“开启”状态。
 local ZAPRET_OFF_FLAG = "/var/run/zapret.off"
@@ -166,7 +168,7 @@ local function zapret_status()
 		installed = true,
 		running   = zapret_running(),
 		mode      = zapret_mode(),
-		enabled   = fs.access("/etc/rc.d/S21zapret") ~= nil
+		enabled   = fs.access(ZAPRET_RC) ~= nil
 	}
 	-- 流量接管有两种形态，必须按模式分别判定。历史缺陷：这里只查 nat 跳转，
 	-- 于是 nfqws 模式（没有 nat 跳转、靠 mangle NFQUEUE）被永久误报成
@@ -316,6 +318,38 @@ local function zapret_service(args)
 	return { result = true, action = action }
 end
 
+-- 开机自启（面板上的复选框）。语义刻意与「启动/停止」分离：
+--   * 这里只管开机行为：`/etc/init.d/zapret enable|disable` 增删 /etc/rc.d/S21zapret；
+--   * **不动**当前进程——取消自启不会把正在跑的分流停掉（那是“停止”按钮的事），
+--     勾上自启也不会立刻启动（避免用户只想改开机行为却被重启一次连接）。
+-- 注意两处联动：
+--   1) /var/run/zapret.off 是 tmpfs，重启即失效；所以“取消自启 + 停止”才是彻底不再启动。
+--   2) /etc/firewall.zapret 的守卫按“自启软链存在 or 进程在跑”判断要不要补接管规则，
+--      因此取消自启后的一次 fw3 reload 不会把正在生效的规则悄悄摘掉。
+local function zapret_autostart_set(args)
+	if not zapret_installed() then
+		return { error = "zapret 未安装" }
+	end
+	local want = tostring(args.enable or "")
+	local cmd
+	if want == "1" or want == "true" then
+		cmd = ZAPRET_INIT .. " enable"
+	elseif want == "0" or want == "false" then
+		cmd = ZAPRET_INIT .. " disable"
+	else
+		return { error = "enable 必须是 1 或 0" }
+	end
+	local sys = require "luci.sys"
+	-- enable/disable 只动一个软链，很快；同步执行以便把真实结果回给前端。
+	sys.call(cmd .. " >/dev/null 2>&1")
+	local enabled = fs.access(ZAPRET_RC) ~= nil
+	-- 期望值与实际不符时明确报错，而不是让面板显示一个“点了没用”的状态。
+	if (want == "1" or want == "true") ~= enabled then
+		return { error = "设置失败：/etc/rc.d/S21zapret 未按预期变化（检查 /etc/init.d/zapret 是否存在）" }
+	end
+	return { result = true, enabled = enabled }
+end
+
 local methods = {
 	status = {
 		call = function()
@@ -368,6 +402,11 @@ local methods = {
 	zapret_service = {
 		args = { action = "" },
 		call = zapret_service
+	},
+	-- 开机自启：args 用字符串（ubus/LuCI 21.02 的位置参数只传简单类型）
+	zapret_autostart = {
+		args = { enable = "" },
+		call = zapret_autostart_set
 	}
 }
 

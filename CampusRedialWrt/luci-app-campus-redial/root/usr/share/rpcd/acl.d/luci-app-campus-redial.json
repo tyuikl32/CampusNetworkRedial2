@@ -14,7 +14,7 @@
         "write": {
             "uci": [ "campus-redial" ],
             "ubus": {
-                "campus_redial": [ "start", "stop", "test", "redial_once", "clear_stats", "zapret_hostlist_set", "zapret_service" ]
+                "campus_redial": [ "start", "stop", "test", "redial_once", "clear_stats", "zapret_hostlist_set", "zapret_service", "zapret_autostart" ]
             }
         }
     }

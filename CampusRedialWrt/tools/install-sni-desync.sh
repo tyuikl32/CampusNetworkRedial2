@@ -309,6 +309,14 @@ for f in /etc/rc.d/S*zapret; do
 	if [ -e "\$f" ]; then ZAPRET_ON=1; break; fi
 done
 
+# 例外：自启软链被取消、但进程仍在跑时，规则必须继续补。
+# 面板上的“开机自启”复选框取消勾选就是这个状态（只改开机行为、不停进程）；
+# 若这里只认软链，一次 fw3 reload 会把接管规则悄悄摘掉，表现成
+# “进程在跑但没接管流量”，排查起来很费时间。
+if [ -z "\$ZAPRET_ON" ] && { pidof tpws >/dev/null 2>&1 || pidof nfqws >/dev/null 2>&1; }; then
+	ZAPRET_ON=1
+fi
+
 if [ -n "\$ZAPRET_ON" ] && [ ! -e /var/run/zapret.off ]; then
 	SCRIPT=\$(readlink /etc/init.d/zapret)
 	if [ -n "\$SCRIPT" ]; then

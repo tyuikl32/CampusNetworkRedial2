@@ -32,6 +32,9 @@ const callZapretStatus = rpc.declare({ object: 'campus_redial', method: 'zapret_
 const callZapretHostlistGet = rpc.declare({ object: 'campus_redial', method: 'zapret_hostlist_get', expect: {} });
 const callZapretHostlistSet = rpc.declare({ object: 'campus_redial', method: 'zapret_hostlist_set', params: [ 'hostlist' ], expect: {} });
 const callZapretService = rpc.declare({ object: 'campus_redial', method: 'zapret_service', params: [ 'action' ], expect: {} });
+/* 开机自启：只改开机行为（/etc/rc.d/S21zapret 软链），不动当前进程。
+ * 参数用字符串 '1'/'0'——LuCI 21.02 的 rpc.js 按位置传参，布尔在某些后端会被拒。 */
+const callZapretAutostart = rpc.declare({ object: 'campus_redial', method: 'zapret_autostart', params: [ 'enable' ], expect: {} });
 
 const stateNames = {
 	idle: _('空闲'), unavailable: _('后台未启动'), starting: _('正在启动'),
@@ -251,7 +254,20 @@ return view.extend({
 			setContent(this.zapretHintNode, E('em', {}, _('检测到本机未安装 zapret（/opt/zapret 缺失）。在 PC 上执行 tools/install-sni-desync.sh 可启用 SNI 分流。')));
 			if (this.zapretActionsNode) this.zapretActionsNode.style.display = 'none';
 			if (this.zapretEditorWrap) this.zapretEditorWrap.style.display = 'none';
+			if (this.zapretAutostartRow) this.zapretAutostartRow.style.display = 'none';
 			return;
+		}
+		if (this.zapretAutostartRow) this.zapretAutostartRow.style.display = '';
+		/* 开机自启复选框：以服务端返回的 enabled 为准（不要用本地点击后的乐观值，
+		 * 否则 rpcd 失败时面板会显示一个“看起来生效其实没生效”的勾）。 */
+		if (this.zapretAutostartInput) {
+			this.zapretAutostartInput.checked = !!s.enabled;
+			this.zapretAutostartInput.disabled = !!this.zapretAutostartBusy;
+		}
+		if (this.zapretAutostartHintNode) {
+			setContent(this.zapretAutostartHintNode, s.enabled
+				? _('重启后自动启动；取消勾选不影响当前运行状态')
+				: _('重启后不再启动；要立刻停用请点“停止”'));
 		}
 		const redirect = (s.redirect === undefined) ? !!s.running : !!s.redirect;
 		if (this.zapretActionsNode) this.zapretActionsNode.style.display = '';
@@ -288,7 +304,9 @@ return view.extend({
 					_('异常：tpws 未运行，但 nat 跳转仍在——所有网页会 connection refused（本面板也会打不开）。点“停止”可立刻摘除跳转、恢复直连。')));
 		} else if (!s.running) {
 			setContent(this.zapretHintNode, E('em', {},
-				_('SNI 分流已停止：流量直连，不受分流影响。')));
+				s.enabled
+					? _('SNI 分流已停止：流量直连，不受分流影响。“停止”只影响本次运行，重启后会按“开机自启”设置恢复。')
+					: _('SNI 分流已停止：流量直连，不受分流影响。开机自启也已关闭，重启后不会再启动。')));
 		} else if (!redirect) {
 			setContent(this.zapretHintNode, E('em', { 'style': 'color:#b8860b' },
 				nfqws
@@ -332,6 +350,41 @@ return view.extend({
 				return poll(1200).then(() => poll(2000));
 			}
 		}).catch(err => ui.addNotification(null, E('p', _('操作失败：%s').format(err.message)), 'error'));
+	},
+
+	/* 开机自启开关。语义与“启动/停止”分离：
+	 *   勾选/取消 = 只改 /etc/rc.d/S21zapret（下次开机行为），不动当前进程；
+	 *   失败时把复选框状态退回原值，避免显示“已生效”的假象。 */
+	setZapretAutostart(enable) {
+		if (this.zapretAutostartBusy)
+			return Promise.resolve();
+		this.zapretAutostartBusy = true;
+		if (this.zapretAutostartInput)
+			this.zapretAutostartInput.disabled = true;
+
+		const revert = () => {
+			this.zapretAutostartBusy = false;
+			if (this.zapretAutostartInput) {
+				this.zapretAutostartInput.disabled = false;
+				this.zapretAutostartInput.checked = !enable;
+			}
+		};
+
+		return callZapretAutostart(enable ? '1' : '0').then(res => {
+			if (res && res.error) {
+				revert();
+				ui.addNotification(null, E('p', _('设置失败：%s').format(res.error)), 'error');
+				return this.refresh();
+			}
+			this.zapretAutostartBusy = false;
+			ui.addNotification(null, E('p', enable
+				? _('已设置开机自启：下次开机自动启动 SNI 分流（当前运行状态不变）')
+				: _('已取消开机自启：重启后不再自动启动（当前运行状态不变）')));
+			return this.refresh();
+		}).catch(err => {
+			revert();
+			ui.addNotification(null, E('p', _('设置失败：%s').format(err.message)), 'error');
+		});
 	},
 
 	runAction(call, successText) {
@@ -382,6 +435,21 @@ return view.extend({
 			'class': 'cbi-button cbi-button-important',
 			'click': ui.createHandlerFn(this, () => this.saveZapretHostlist())
 		}, _('保存名单并生效'));
+		/* 开机自启：与“启动/停止”刻意分离——只决定下次开机是否自动拉起，
+		 * 不动当前进程。改的是一个软链，很快，所以即时生效，不走“保存名单”流程。 */
+		this.zapretAutostartInput = E('input', {
+			'id': 'cr-zapret-autostart',
+			'type': 'checkbox',
+			'change': ui.createHandlerFn(this, ev => this.setZapretAutostart(ev.target.checked))
+		});
+		this.zapretAutostartHintNode = E('span', {
+			'style': 'margin-left:.6rem;color:var(--text-color-medium,#666);font-size:90%'
+		});
+		this.zapretAutostartCell = E('span', {}, [
+			E('label', { 'for': 'cr-zapret-autostart', 'style': 'cursor:pointer;user-select:none' },
+				[ this.zapretAutostartInput, ' ', _('开机自动启动 SNI 分流') ]),
+			this.zapretAutostartHintNode
+		]);
 		this.zapretActionsNode = E('div', { 'class': 'cbi-page-actions', 'style': 'display:flex;gap:.5rem;flex-wrap:wrap' }, [
 			this.zapretStartButton, this.zapretStopButton, this.zapretRestartButton, zapretSaveButton
 		]);
@@ -432,7 +500,8 @@ return view.extend({
 			E('p', { 'style': 'color:var(--text-color-medium,#666)' },
 				_('对名单内域名的 HTTPS 连接做 ClientHello 分片，使校园网 DPI 读不到 SNI，流量回到默认不限速类。名单外流量不受影响。')),
 			E('table', { 'class': 'table' }, [
-				E('tr', { 'class': 'tr' }, [ E('td', { 'class': 'td left', 'width': '25%' }, _('服务状态')), E('td', { 'class': 'td left' }, this.zapretStateNode) ])
+				E('tr', { 'class': 'tr' }, [ E('td', { 'class': 'td left', 'width': '25%' }, _('服务状态')), E('td', { 'class': 'td left' }, this.zapretStateNode) ]),
+				this.zapretAutostartRow = E('tr', { 'class': 'tr' }, [ E('td', { 'class': 'td left' }, _('开机自启')), E('td', { 'class': 'td left' }, this.zapretAutostartCell) ])
 			]),
 			this.zapretHintNode,
 			this.zapretTrafficNode,

@@ -70,7 +70,9 @@ EXTRA_DIRS = ["/etc/campus-redial", "/usr/share/luci/menu.d", "/usr/share/rpcd/a
 # the daemon needs jsonfilter + a session-bound fetcher (bind.so or curl);
 # kmod-macvlan / mwan3 are only needed for pool_size > 1 -> documented, not hard deps
 DEPS_DEFAULT = ("libc, luci-base, rpcd, rpcd-mod-luci, uclient-fetch, curl, "
-                "ca-bundle, ppp, ppp-mod-pppoe, ip-tiny, jsonfilter")
+                # 依赖虚拟包 `ip`（ip-tiny / ip-full 都满足）。写死 ip-tiny 会在装了
+                # ip-full 的设备上被 opkg 报成误导性的“架构不兼容”，实测踩过。
+                "ca-bundle, ppp, ppp-mod-pppoe, ip, jsonfilter")
 CONFFILES = [
     "/etc/config/campus-redial",
     "/etc/campus-redial/stats.json",

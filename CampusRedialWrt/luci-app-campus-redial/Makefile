@@ -13,7 +13,7 @@ define Package/$(PKG_NAME)
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=Campus network automatic redial
-  DEPENDS:=+luci-base +rpcd +rpcd-mod-luci +uclient-fetch +ca-bundle +ppp +ppp-mod-pppoe +ip-tiny +kmod-macvlan +mwan3
+  DEPENDS:=+luci-base +rpcd +rpcd-mod-luci +uclient-fetch +ca-bundle +ppp +ppp-mod-pppoe +ip +kmod-macvlan +mwan3
 endef
 
 define Package/$(PKG_NAME)/description
