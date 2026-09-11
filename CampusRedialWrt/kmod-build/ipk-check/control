@@ -1,0 +1,12 @@
+Package: kmod-macvlan
+Version: 5.4-qsdk-11.5.0.5-1
+Depends: kernel (=5.4-qsdk-11.5.0.5-1-6be5791bae9794f7d4dc8a02dd8d6a55)
+Source: package/kernel/linux
+SourceName: kmod-macvlan
+License: GPL-2.0
+Section: kernel
+SourceDateEpoch: 1722097001
+Architecture: arm_cortex-a7_neon-vfpv4
+Installed-Size: 10696
+Description:  A kernel module which allows one to create virtual interfaces that
+ map packets to or from specific MAC addresses to a particular interface

@@ -1,0 +1,664 @@
+6,0,0,-;Booting Linux on physical CPU 0x0
+5,1,0,-;Linux version 5.4.164 (builder@DESKTOP-H0F9EJJ) (gcc version 8.4.0 (OpenWrt GCC 8.4.0 r16847-f8282da11e)) #0 SMP PREEMPT Mon Apr 17 13:15:36 2023
+6,2,0,-;CPU: ARMv7 Processor [51af8014] revision 4 (ARMv7), cr=10c0383d
+6,3,0,-;CPU: div instructions available: patching division code
+6,4,0,-;CPU: PIPT / VIPT nonaliasing data cache, VIPT aliasing instruction cache
+6,5,0,-;OF: fdt: Machine model: Redmi AX3000
+6,6,0,-;Memory policy: Data cache writealloc
+7,7,0,-;On node 0 totalpages: 49152
+7,8,0,-;  Normal zone: 576 pages used for memmap
+7,9,0,-;  Normal zone: 0 pages reserved
+7,10,0,-;  Normal zone: 49152 pages, LIFO batch:15
+6,11,0,-;psci: probing for conduit method from DT.
+6,12,0,-;psci: PSCIv1.0 detected in firmware.
+6,13,0,-;psci: Using standard PSCI v0.2 function IDs
+6,14,0,-;psci: MIGRATE_INFO_TYPE not supported.
+6,15,0,-;psci: SMC Calling Convention v1.0
+6,16,0,-;psci: OSI mode supported.
+6,17,0,-;percpu: Embedded 15 pages/cpu s32140 r8192 d21108 u61440
+7,18,0,-;pcpu-alloc: s32140 r8192 d21108 u61440 alloc=15*4096
+7,19,0,-;pcpu-alloc: [0] 0 [0] 1 
+6,20,0,-;Built 1 zonelists, mobility grouping on.  Total pages: 48576
+5,21,0,-;Kernel command line: console=ttyMSM0,115200n8 ubi.mtd=rootfs root=mtd:ubi_rootfs rootfstype=squashfs rootwait root=/dev/ubiblock0_1 coherent_pool=2M
+6,22,0,-;Dentry cache hash table entries: 32768 (order: 5, 131072 bytes, linear)
+6,23,0,-;Inode-cache hash table entries: 16384 (order: 4, 65536 bytes, linear)
+6,24,0,-;mem auto-init: stack:off, heap alloc:off, heap free:off
+6,25,0,-;Memory: 183424K/196608K available (6493K kernel code, 245K rwdata, 1976K rodata, 1024K init, 348K bss, 13184K reserved, 0K cma-reserved, 0K highmem)
+6,26,0,-;SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+6,27,0,-;rcu: Preemptible hierarchical RCU implementation.
+6,28,0,-;\x09Tasks RCU enabled.
+6,29,0,-;rcu: RCU calculated value of scheduler-enlistment delay is 10 jiffies.
+6,30,0,-;NR_IRQS: 16, nr_irqs: 16, preallocated irqs: 16
+6,31,0,-;GICv2m: range[mem 0x0b00a000-0x0b00affc], SPI[448:479]
+6,32,0,-;GICv2m: range[mem 0x0b00b000-0x0b00bffc], SPI[480:511]
+5,33,0,-;random: get_random_bytes called from start_kernel+0x344/0x4f4 with crng_init=0
+6,34,0,-;arch_timer: cp15 and mmio timer(s) running at 24.00MHz (virt/virt).
+6,35,0,-;clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+6,36,5,-;sched_clock: 56 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+6,37,17,-;Switching to timer-based delay loop, resolution 41ns
+6,38,353,-;Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=240000)
+6,39,371,-;pid_max: default: 32768 minimum: 301
+6,40,525,-;Mount-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+6,41,539,-;Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+6,42,1428,-;CPU: Testing write buffer coherency: ok
+6,43,1856,-;CPU0: thread -1, cpu 0, socket 0, mpidr 80000000
+6,44,2683,-;Setting up static identity map for 0x41300000 - 0x41300060
+6,45,2865,-;rcu: Hierarchical SRCU implementation.
+6,46,3361,-;smp: Bringing up secondary CPUs ...
+6,47,4348,-;CPU1: thread -1, cpu 1, socket 0, mpidr 80000001
+6,48,4536,-;smp: Brought up 1 node, 2 CPUs
+6,49,4559,-;SMP: Total of 2 processors activated (96.00 BogoMIPS).
+6,50,4565,-;CPU: All CPU(s) started in SVC mode.
+6,51,12708,-;VFP support v0.3: implementor 51 architecture 3 part 40 variant 3 rev 4
+6,52,13118,-;clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+6,53,13145,-;futex hash table entries: 512 (order: 3, 32768 bytes, linear)
+6,54,13304,-;pinctrl core: initialized pinctrl subsystem
+6,55,14412,-;NET: Registered protocol family 16
+6,56,15893,-;DMA: preallocated 2048 KiB pool for atomic coherent allocations
+6,57,17070,-;cpuidle: using governor ladder
+6,58,17121,-;cpuidle: using governor menu
+6,59,17335,-;NET: Registered protocol family 42
+6,60,17682,-;hw-breakpoint: found 5 (+1 reserved) breakpoint and 4 watchpoint registers.
+6,61,17696,-;hw-breakpoint: maximum watchpoint size is 8 bytes.
+6,62,60309,-;qcom,gcc-ipq5018 1800000.gcc: Registered ipq5018 GCC clocks provider
+ SUBSYSTEM=platform
+ DEVICE=+platform:1800000.gcc
+6,63,74929,-;msm_sps_probe: sps:sps is ready
+6,64,103199,-;pps_core: LinuxPPS API ver. 1 registered
+6,65,103214,-;pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+6,66,103235,-;PTP clock support registered
+6,67,104053,-;Advanced Linux Sound Architecture Driver Initialized.
+4,68,104122,-;workqueue: max_active 576 requested for napi_workq is out of range, clamping between 1 and 512
+6,69,105292,-;clocksource: Switched to clocksource arch_sys_counter
+6,70,106143,-;thermal_sys: Registered thermal governor 'step_wise'
+6,71,106149,-;thermal_sys: Registered thermal governor 'user_space'
+6,72,107152,-;NET: Registered protocol family 2
+6,73,107293,-;IP idents hash table entries: 4096 (order: 3, 32768 bytes, linear)
+6,74,107876,-;tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 6144 bytes, linear)
+6,75,107919,-;TCP established hash table entries: 2048 (order: 1, 8192 bytes, linear)
+6,76,107951,-;TCP bind hash table entries: 2048 (order: 2, 16384 bytes, linear)
+6,77,107993,-;TCP: Hash tables configured (established 2048 bind 2048)
+6,78,108110,-;UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+6,79,108140,-;UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+6,80,108386,-;NET: Registered protocol family 1
+6,81,108427,-;PCI: CLS 0 bytes, default 64
+6,82,109852,-;workingset: timestamp_bits=14 max_order=16 bucket_order=2
+6,83,115432,-;squashfs: version 4.0 (2009/01/31) Phillip Lougher
+6,84,115447,-;jffs2: version 2.2 (NAND) (SUMMARY) (LZMA) (RTIME) (CMODE_PRIORITY) (c) 2001-2006 Red Hat, Inc.
+5,85,152447,-;Key type asymmetric registered
+5,86,152469,-;Asymmetric key parser 'x509' registered
+3,87,154400,-;bam-dma-engine 704000.dma: num-channels unspecified in dt
+ SUBSYSTEM=platform
+ DEVICE=+platform:704000.dma
+3,88,154416,-;bam-dma-engine 704000.dma: num-ees unspecified in dt
+ SUBSYSTEM=platform
+ DEVICE=+platform:704000.dma
+3,89,155240,-;bam-dma-engine 7884000.dma: qcom,controlled-remotely unspecified
+ SUBSYSTEM=platform
+ DEVICE=+platform:7884000.dma
+3,90,156280,-;bam-dma-engine 7984000.dma: qcom,controlled-remotely unspecified
+ SUBSYSTEM=platform
+ DEVICE=+platform:7984000.dma
+6,91,158168,-;CPU: IPQ5000, SoC Version: 1.1
+4,92,158876,-;TZ Log : Will warn on Access Violation, as paniconaccessviolation is not set
+6,93,160060,-;msm_serial 78af000.serial: msm_serial: detected port #0
+ SUBSYSTEM=platform
+ DEVICE=+platform:78af000.serial
+6,94,160110,-;msm_serial 78af000.serial: uartclk = 1843199
+ SUBSYSTEM=platform
+ DEVICE=+platform:78af000.serial
+6,95,160176,-;78af000.serial: ttyMSM0 at MMIO 0x78af000 (irq = 29, base_baud = 115199) is a MSM
+6,96,160206,-;msm_serial: console setup on port #0
+6,97,738985,-;printk: console [ttyMSM0] enabled
+6,98,743958,-;msm_serial: driver initialized
+5,99,748510,-;random: fast init done
+5,100,751979,-;random: crng init done
+6,101,759295,-;brd: module loaded
+6,102,763697,-;loop: module loaded
+6,103,765991,-;nand: device found, Manufacturer ID: 0xc8, Chip ID: 0x11
+6,104,766017,-;nand: ESMT F50D1G41LB(2M) SPI NAND 1G 1.8V
+6,105,772233,-;nand: 128 MiB, SLC, erase size: 128 KiB, page size: 2048, OOB size: 64
+6,106,777285,-;qcom-nandc 79b0000.qpic-nand: cfg0 9a3c08d0 cfg1 8287440 ecc_buf_cfg 203 ecc_bch cfg 42040700 cw_size 528 cw_data 516 strength 4 parity_bytes 12 steps 4
+ SUBSYSTEM=platform
+ DEVICE=+platform:79b0000.qpic-nand
+3,107,784886,-;qcom-nandc 79b0000.qpic-nand: Serial training partition not found
+ SUBSYSTEM=platform
+ DEVICE=+platform:79b0000.qpic-nand
+3,108,799644,-;qcom-nandc 79b0000.qpic-nand: failed to enable serial training
+ SUBSYSTEM=platform
+ DEVICE=+platform:79b0000.qpic-nand
+5,109,806730,-;19 fixed-partitions partitions found on MTD device qcom_nand.0
+5,110,813380,-;Creating 19 MTD partitions on "qcom_nand.0":
+5,111,820270,-;0x000000000000-0x000000080000 : "0:SBL1"
+5,112,827178,-;0x000000080000-0x000000100000 : "0:MIBIB"
+5,113,832031,-;0x000000100000-0x000000140000 : "0:BOOTCONFIG"
+5,114,836785,-;0x000000140000-0x000000180000 : "0:BOOTCONFIG1"
+5,115,842066,-;0x000000180000-0x000000280000 : "0:QSEE"
+5,116,848403,-;0x000000280000-0x000000380000 : "0:QSEE_1"
+5,117,853532,-;0x000000380000-0x0000003c0000 : "0:DEVCFG"
+5,118,857790,-;0x0000003c0000-0x000000400000 : "0:DEVCFG_1"
+5,119,862831,-;0x000000400000-0x000000440000 : "0:CDT"
+5,120,868351,-;0x000000440000-0x000000480000 : "0:CDT_1"
+5,121,872998,-;0x000000480000-0x000000500000 : "0:APPSBLENV"
+5,122,878470,-;0x000000500000-0x000000640000 : "0:APPSBL"
+5,123,884469,-;0x000000640000-0x000000780000 : "0:APPSBL_1"
+5,124,889583,-;0x000000780000-0x000000880000 : "0:ART"
+5,125,894747,-;0x000000880000-0x000000900000 : "0:TRAINING"
+5,126,898907,-;0x000000900000-0x000000980000 : "bdata"
+5,127,904392,-;0x000000980000-0x000000a00000 : "crash"
+5,128,909094,-;0x000000a00000-0x000000a80000 : "crash_log"
+5,129,913914,-;0x000000a80000-0x000007f00000 : "rootfs"
+5,130,1027136,-;mtd: device 18 (rootfs) set to be root filesystem
+1,131,1027442,-;mtdsplit: no squashfs found in "rootfs"
+6,132,1033128,-;libphy: Fixed MDIO Bus: probed
+6,133,1256867,-;qca-mdio 88000.mdio: Could not find phy-reset-gpio
+ SUBSYSTEM=platform
+ DEVICE=+platform:88000.mdio
+6,134,1257073,-;libphy: qca_mdio: probed
+6,135,1262187,-;qca-mdio 88000.mdio: qca-mdio driver was registered
+ SUBSYSTEM=platform
+ DEVICE=+platform:88000.mdio
+6,136,1705742,-;qca-mdio 90000.mdio: Could not find phy-reset-gpio
+ SUBSYSTEM=platform
+ DEVICE=+platform:90000.mdio
+6,137,1705937,-;libphy: qca_mdio: probed
+6,138,1713170,-;qca-mdio 90000.mdio: qca-mdio driver was registered
+ SUBSYSTEM=platform
+ DEVICE=+platform:90000.mdio
+6,139,1824525,-;i2c /dev entries driver
+3,140,1825420,-;qcom-tsens 4a9000.thermal-sensor: tsens device is not enabled
+ SUBSYSTEM=platform
+ DEVICE=+platform:4a9000.thermal-sensor
+4,141,1828599,-;cpufreq: cpufreq_online: CPU0: Running at unlisted freq: 799999 KHz
+4,142,1833899,-;cpufreq: cpufreq_online: CPU0: Unlisted initial frequency changed to: 800000 KHz
+6,143,1842608,-;sdhci: Secure Digital Host Controller Interface driver
+6,144,1849622,-;sdhci: Copyright(c) Pierre Ossman
+6,145,1855562,-;sdhci-pltfm: SDHCI platform and OF driver helper
+6,146,1860389,-;\x0aVersion Rollback Feature Disabled
+6,147,1868009,-;remoteproc remoteproc0: cd00000.remoteproc is available
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,148,1872323,-;remoteproc remoteproc1: 4ab000.remoteproc_pd1 is available
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+6,149,1878485,-;remoteproc remoteproc2: cd00000.remoteproc:remoteproc_pd2 is available
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+6,150,1884565,-;coresight-tmc 6048000.tmc: No Q6 ETR memory region specified
+ SUBSYSTEM=amba
+ DEVICE=+amba:6048000.tmc
+3,151,1891887,-;coresight-tmc 6047000.tmc: failed to get flush cti, defer probe
+ SUBSYSTEM=amba
+ DEVICE=+amba:6047000.tmc
+4,152,1898747,-;coresight-dynamic-funnel 6041000.funnel: Uses obsolete Coresight DT bindings
+ SUBSYSTEM=amba
+ DEVICE=+amba:6041000.funnel
+6,153,1907743,-;coresight coresight-etm0: CPU0: ETM v4.0 initialized
+ SUBSYSTEM=coresight
+ DEVICE=+coresight:coresight-etm0
+6,154,1913533,-;coresight-etm4x 619c000.etm: CPU0: (null) initialized
+ SUBSYSTEM=amba
+ DEVICE=+amba:619c000.etm
+6,155,1920061,-;coresight coresight-etm1: CPU1: ETM v4.0 initialized
+ SUBSYSTEM=coresight
+ DEVICE=+coresight:coresight-etm1
+6,156,1925564,-;coresight-etm4x 619d000.etm: CPU1: (null) initialized
+ SUBSYSTEM=amba
+ DEVICE=+amba:619d000.etm
+6,157,1931847,-;coresight-stm 6002000.stm: coresight-stm : stm_register_device failed, probing deferred
+ SUBSYSTEM=amba
+ DEVICE=+amba:6002000.stm
+3,158,1937817,-;OF: graph: no port node found in /soc/cti@6010000
+3,159,1946762,-;OF: graph: no port node found in /soc/cti@6011000
+3,160,1952585,-;OF: graph: no port node found in /soc/cti@6012000
+3,161,1958367,-;OF: graph: no port node found in /soc/cti@6013000
+3,162,1964035,-;OF: graph: no port node found in /soc/cti@6014000
+3,163,1969828,-;OF: graph: no port node found in /soc/cti@6015000
+3,164,1975555,-;OF: graph: no port node found in /soc/cti@6016000
+3,165,1981233,-;OF: graph: no port node found in /soc/cti@6017000
+3,166,1986997,-;OF: graph: no port node found in /soc/cti@6018000
+3,167,1992702,-;OF: graph: no port node found in /soc/cti@6019000
+3,168,1998485,-;OF: graph: no port node found in /soc/cti@601a000
+3,169,2004138,-;OF: graph: no port node found in /soc/cti@601b000
+3,170,2009963,-;OF: graph: no port node found in /soc/cti@601c000
+3,171,2015666,-;OF: graph: no port node found in /soc/cti@601d000
+3,172,2021317,-;OF: graph: no port node found in /soc/cti@601e000
+3,173,2027118,-;OF: graph: no port node found in /soc/cti@601f000
+3,174,2032785,-;OF: graph: no port node found in /soc/cti@6198000
+3,175,2038594,-;OF: graph: no port node found in /soc/cti@6199000
+3,176,2044269,-;OF: graph: no port node found in /soc/cti@610c000
+3,177,2051076,-;OF: graph: no port node found in /soc/hwevent@6101000
+3,178,2055523,-;coresight-hwevent 6101000.hwevent: No csr data
+ SUBSYSTEM=platform
+ DEVICE=+platform:6101000.hwevent
+3,179,2061888,-;OF: graph: no port node found in /soc/csr@6001000
+6,180,2067096,-;coresight-csr 6001000.csr: CSR initialized: coresight-csr
+ SUBSYSTEM=platform
+ DEVICE=+platform:6001000.csr
+6,181,2074589,-;NET: Registered protocol family 10
+6,182,2080332,-;Segment Routing with IPv6
+6,183,2083559,-;NET: Registered protocol family 17
+6,184,2087451,-;8021q: 802.1Q VLAN Support v1.8
+5,185,2091742,-;Registering SWP/SWPB emulation handler
+6,186,2108499,-;coresight-tmc 6048000.tmc: No Q6 ETR memory region specified
+ SUBSYSTEM=amba
+ DEVICE=+amba:6048000.tmc
+6,187,2108671,-;sps_register_bam_device: sps:BAM 0x06064000 is registered
+6,188,2115539,-;coresight coresight-stm: STM32 initialized
+ SUBSYSTEM=coresight
+ DEVICE=+coresight:coresight-stm
+5,189,2120955,-;ubi0: attaching mtd18
+5,190,2601433,-;ubi0: scanning is finished
+5,191,2607885,-;ubi0: attached mtd18 (name "rootfs", size 116 MiB)
+5,192,2607911,-;ubi0: PEB size: 131072 bytes (128 KiB), LEB size: 126976 bytes
+5,193,2612601,-;ubi0: min./max. I/O unit sizes: 2048/2048, sub-page size 2048
+5,194,2619528,-;ubi0: VID header offset: 2048 (aligned 2048), data offset: 4096
+5,195,2626346,-;ubi0: good PEBs: 932, bad PEBs: 0, corrupted PEBs: 0
+5,196,2633086,-;ubi0: user volume: 3, internal volumes: 1, max. volumes count: 128
+5,197,2639360,-;ubi0: max/mean erase counter: 2/0, WL threshold: 4096, image sequence number: 1681737336
+5,198,2646390,-;ubi0: available PEBs: 0, total reserved PEBs: 932, PEBs reserved for bad PEB handling: 20
+5,199,2655739,-;ubi0: background thread "ubi_bgt0d" started, PID 84
+6,200,2665618,-;block ubiblock0_1: created from ubi0:1(rootfs)
+ SUBSYSTEM=block
+ DEVICE=b254:0
+6,201,2670510,-;hctosys: unable to open rtc device (rtc0)
+6,202,2676686,-;ALSA device list:
+6,203,2681173,-;  No soundcards found.
+6,204,2688225,-;VFS: Mounted root (squashfs filesystem) readonly on device 254:0.
+6,205,2689421,-;Freeing unused kernel memory: 1024K
+6,206,2735562,-;Run /sbin/init as init process
+14,207,2944450,-;init: Console is alive
+14,208,2944690,-;init: - watchdog -
+14,209,3556654,-;kmodloader: loading kernel modules from /etc/modules-boot.d/*
+14,210,3568600,-;kmodloader: done loading kernel modules from /etc/modules-boot.d/*
+14,211,3574581,-;init: - preinit -
+5,212,7390285,-;UBIFS (ubi0:2): Mounting in unauthenticated mode
+5,213,7390554,-;UBIFS (ubi0:2): background thread "ubifs_bgt0_2" started, PID 164
+5,214,7415458,-;UBIFS (ubi0:2): recovery needed
+5,215,7517904,-;UBIFS (ubi0:2): recovery completed
+5,216,7518115,-;UBIFS (ubi0:2): UBIFS: mounted UBI device 0, volume 2, name "rootfs_data"
+5,217,7521364,-;UBIFS (ubi0:2): LEB size: 126976 bytes (124 KiB), min./max. I/O unit sizes: 2048 bytes/2048 bytes
+5,218,7529258,-;UBIFS (ubi0:2): FS size: 68820992 bytes (65 MiB, 542 LEBs), journal size 3428352 bytes (3 MiB, 27 LEBs)
+5,219,7539080,-;UBIFS (ubi0:2): reserved for root: 3250585 bytes (3174 KiB)
+5,220,7549296,-;UBIFS (ubi0:2): media format: w5/r0 (latest is w5/r0), UUID C0DA3F10-9F96-4F51-8FF5-EA0EF1570665, small LPT model
+14,221,7560365,-;mount_root: switching to ubifs overlay
+12,222,7576570,-;urandom-seed: Seeding with /etc/urandom.seed
+14,223,7637366,-;procd: - early -
+14,224,7637481,-;procd: - watchdog -
+14,225,8201231,-;procd: - watchdog -
+14,226,8203005,-;procd: - ubus -
+14,227,8258616,-;procd: - init -
+14,228,8669194,-;urngd: v1.0.2 started.
+14,229,8732575,-;kmodloader: loading kernel modules from /etc/modules.d/*
+4,230,8753000,-;ssdk_switch_device_num_init[1210]:INFO:ess-switch dts node number: 2
+4,231,8753050,-;ssdk_dt_get_switch_node[1015]:INFO:ess-switch DT exist!
+4,232,8759507,-;ssdk_dt_parse_access_mode[901]:INFO:switch_access_mode: local bus
+4,233,8765536,-;ssdk_dt_parse_access_mode[914]:INFO:switchreg_base_addr: 0x39c00000
+4,234,8772737,-;ssdk_dt_parse_access_mode[915]:INFO:switchreg_size: 0x200000
+4,235,8780006,-;ssdk_dt_parse_mac_mode[304]:INFO:mac mode = 0xf
+4,236,8786861,-;ssdk_dt_parse_mac_mode[310]:INFO:mac mode1 doesn't exit!
+4,237,8792094,-;ssdk_dt_parse_mac_mode[319]:INFO:mac mode2 doesn't exit!
+4,238,8798843,-;ssdk_dt_parse_port_bmp[802]:INFO:port_bmp doesn't exist!
+4,239,8805058,-;ssdk_dt_parse_uniphy[341]:INFO:ess-uniphy DT exist!
+4,240,8811432,-;ssdk_dt_parse_led[988]:INFO:current dts led_source_num is 0
+4,241,8817066,-;ssdk_plat_init start
+4,242,11385312,-;ssdk_mp_reset_init[812]:INFO:MP reset successfully!
+4,243,11385372,-;ssdk_gcc_clock_init[1206]:INFO:SSDK gcc clock init successfully!
+4,244,11390651,-;mpge_phy_api_ops_init[1089]:INFO:qca probe mpge phy driver succeeded!
+4,245,11397785,-;mpge_phy_dac_set[917]:INFO:phy mdac is set as 0x10
+4,246,11404753,-;mpge_phy_dac_set[929]:INFO:phy edac is set as 0x10
+4,247,11410509,-;regi_init[3788]:INFO:Initializing SCOMPHY!
+4,248,12579341,-;_adpt_mp_uniphy_clk_output_ctrl_set[236]:INFO:uniphy will output clock as 25000000Hz
+4,249,12579457,-;ssdk_switch_register[1862]:INFO:Chip version 0xee
+4,250,12587256,-;qca_link_polling_select[1370]:INFO:link-polling-required node does not exist
+4,251,12592825,-;ssdk_switch_register[1896]:INFO:polling is selected
+4,252,12601011,-;regi_init[3798]:INFO:Initializing SCOMPHY Done!!
+4,253,12606669,-;ssdk_dt_get_switch_node[1015]:INFO:ess-switch DT exist!
+4,254,12612533,-;ssdk_dt_parse_access_mode[901]:INFO:switch_access_mode: mdio
+4,255,12618541,-;ssdk_dt_parse_mac_mode[301]:INFO:mac mode doesn't exit!
+4,256,12625483,-;ssdk_dt_parse_mac_mode[310]:INFO:mac mode1 doesn't exit!
+4,257,12631450,-;ssdk_dt_parse_mac_mode[319]:INFO:mac mode2 doesn't exit!
+4,258,12638105,-;ssdk_dt_parse[1112]:INFO:switch node is qca83xx!
+4,259,12644383,-;ssdk_plat_init start
+4,260,12714709,-;f1_phy_api_ops_init[1603]:INFO:qca probe f1 phy driver succeeded!
+4,261,12714734,-;regi_init[3737]:INFO:Initializing ISISC!!
+3,262,12720858,-;OF: /soc/ess-instance/ess-switch1@1: could not get #gpio-cells for /soc/phy@86000
+4,263,12725874,-;qca_ar8327_gpio_reset[3663]:ERROR:gpio26 request failed, ret:-517
+4,264,12734507,-;ssdk_switch_register[1870]:INFO:Chip version 0x1302
+4,265,12741534,-;qca_link_polling_select[1370]:INFO:link-polling-required node does not exist
+4,266,12747229,-;ssdk_switch_register[1896]:INFO:polling is selected
+4,267,14525302,-;regi_init[3742]:INFO:Initializing ISISC Done!!
+4,268,14525408,-;regi_init[3824]:INFO:qca-ssdk module init succeeded!
+6,269,14532199,-;tun: Universal TUN/TAP device driver, 1.6
+6,270,14539848,-;(unnamed net_device) (uninitialized): nss_dp_gmac: Registering netdev eth%d(qcom-id:1) with GMAC, mac_base: 0x90f10000
+6,271,14542871,-;(unnamed net_device) (uninitialized): nss_dp_gmac: Registering netdev eth%d(qcom-id:2) with GMAC, mac_base: 0x90f30000
+6,272,14553920,-;**********************************************************
+6,273,14564289,-;* NSS Data Plane driver
+6,274,14570805,-;**********************************************************
+1,275,14716621,-;nss_driver - fw of size 781856  bytes copied to load addr: 40000000, nss_id : 0
+1,276,14718390,-;Supported Frequencies - 
+1,277,14718395,-;850 MHz 
+1,278,14723782,-;1 GHz 
+1,279,14727711,-;
+1,280,14731741,-;7f0f7e40: set sdma 8eb7b100
+1,281,14733706,-;node size 2 # items 4
+1,282,14736920,-;memory: 40000000 268435456 (avl 198627328) items 4 active_cores 1
+1,283,14740301,-;addr/size storage words 2 2 # words 4 in DTS, ddr size 800000
+1,284,14748806,-;7f0f7e40: NSS core 0 DDR from 40000000 to 40800000
+1,285,14754331,-;7f0f7e40: meminfo init succeed
+6,286,14771838,-;gre: GRE over IPv4 demultiplexor driver
+6,287,14774103,-;ip_gre: GRE over IPv4 tunneling driver
+1,288,14792000,-;node size 2 # items 4
+1,289,14792032,-;memory: 40000000 268435456 (avl 198627328) items 4 active_cores 1
+1,290,14794300,-;addr/size storage words 2 2 # words 4 in DTS, ddr size 800000
+1,291,14801495,-;7f0f7e40: nss core 0 booted successfully
+5,292,14854301,-;nss_wifi_meshmgr_init_module[1997]:Module Build Id: 08/16/26, 06:46:16 loaded
+6,293,14868431,-;Loading modules backported from Linux version ab1f9ff
+6,294,14868462,-;Backport generated by backports.git ab1f9ff
+6,295,14928245,-;xt_time: kernel timezone is -0000
+6,296,15087562,-;PPP generic driver version 2.4.2
+6,297,15093621,-;NET: Registered protocol family 24
+6,298,15096306,-;PPTP driver version 0.8.5
+6,299,15177704,-;ath11k c000000.wifi: ipq5018 hw1.0
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,300,15178120,-;remoteproc remoteproc1: powering up 4ab000.remoteproc_pd1
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+6,301,15234842,-;remoteproc remoteproc1: Booting fw image IPQ5018/q6_fw.mdt, size 1820
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+6,302,15234922,-;remoteproc remoteproc0: powering up cd00000.remoteproc
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,303,15241401,-;remoteproc remoteproc0: Booting fw image IPQ5018/q6_fw.mdt, size 1820
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,304,16867626,-;Subsystem error monitoring/handling services are up
+6,305,16986569,-;remoteproc remoteproc0: remote processor cd00000.remoteproc is now up
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,306,16996721,-;Subsystem error monitoring/handling services are up
+6,307,17016626,-;ath11k c000000.wifi: chip_id 0x0 chip_family 0x4 board_id 0x10 soc_id 0xffffffff
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,308,17016660,-;ath11k c000000.wifi: fw_version 0x270206d0 fw_build_timestamp 2022-08-04 13:28 fw_build_id QC_IMAGE_VERSION_STRING=WLAN.HK.2.7.0.1-01744-QCAHKSWPL_SILICONZ-1
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,309,17043184,-;ath11k c000000.wifi: qmi caldata downloaded: type: 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,310,17115323,-;remoteproc remoteproc1: remote processor 4ab000.remoteproc_pd1 is now up
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+3,311,17120621,-;ath11k c000000.wifi: No qcom,pta_num entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,312,17120648,-;ath11k soc:wifi1@c000000: qcn6122
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+3,313,17122130,-;ath11k c000000.wifi: No qcom,coex_mode entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+3,314,17122136,-;ath11k c000000.wifi: No qcom,bt-active-time entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+3,315,17122141,-;ath11k c000000.wifi: No qcom,bt-priority-time entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+3,316,17122147,-;ath11k c000000.wifi: No qcom,coex-algo entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+3,317,17122154,-;ath11k c000000.wifi: No qcom,pta-priority entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,318,17128668,-;remoteproc remoteproc2: powering up cd00000.remoteproc:remoteproc_pd2
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+6,319,17166562,-;remoteproc remoteproc2: Booting fw image IPQ5018/q6_fw.mdt, size 1820
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+6,320,17176430,-;Subsystem error monitoring/handling services are up
+4,321,17257532,-;ath11k soc:wifi1@c000000: qmi ignore invalid mem req type 10
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+6,322,17308691,-;remoteproc remoteproc2: remote processor cd00000.remoteproc:remoteproc_pd2 is now up
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+14,323,17310706,-;kmodloader: done loading kernel modules from /etc/modules.d/*
+4,324,17388858,-;ath11k c000000.wifi: Direct firmware load for ath11k/IPQ5018/hw1.0/qdss_trace_config.bin failed with error -2
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,325,17388895,-;ath11k c000000.wifi: Falling back to sysfs fallback for: ath11k/IPQ5018/hw1.0/qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,326,17404104,-;ath11k soc:wifi1@c000000: chip_id 0x0 chip_family 0x4 board_id 0x60 soc_id 0xffffffff
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+6,327,17409697,-;ath11k soc:wifi1@c000000: fw_version 0x270206d0 fw_build_timestamp 2022-08-04 13:28 fw_build_id QC_IMAGE_VERSION_STRING=WLAN.HK.2.7.0.1-01744-QCAHKSWPL_SILICONZ-1
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+6,328,17440317,-;ath11k soc:wifi1@c000000: qmi caldata downloaded: type: 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+7,329,17653313,-;ieee80211 phy1: copying sband (band 1) due to VHT EXT NSS BW flag
+ SUBSYSTEM=ieee80211
+ DEVICE=+ieee80211:phy1
+4,330,17662498,-;ath11k soc:wifi1@c000000: Direct firmware load for ath11k/qcn6122/hw1.0/qdss_trace_config.bin failed with error -2
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+4,331,17662536,-;ath11k soc:wifi1@c000000: Falling back to sysfs fallback for: ath11k/qcn6122/hw1.0/qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+4,332,17813136,-;ath11k c000000.wifi: Direct firmware load for qdss_trace_config.bin failed with error -2
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,333,17813173,-;ath11k c000000.wifi: Falling back to sysfs fallback for: qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,334,18587368,-;ath11k c000000.wifi: qmi failed to load QDSS config: qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,335,18587399,-;ath11k c000000.wifi: Failed to download QDSS config to FW: -12
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,336,22914543,-;br-lan: port 1(eth1) entered blocking state
+6,337,22914571,-;br-lan: port 1(eth1) entered disabled state
+6,338,22920591,-;device eth1 entered promiscuous mode
+6,339,22935890,-;br-lan: port 1(eth1) entered blocking state
+6,340,22935920,-;br-lan: port 1(eth1) entered forwarding state
+6,341,22966862,-;nss-dp 39c00000.dp1 eth0: PHY Link up speed: 1000
+ SUBSYSTEM=platform
+ DEVICE=+platform:39c00000.dp1
+6,342,23925780,-;IPv6: ADDRCONF(NETDEV_CHANGE): br-lan: link becomes ready
+6,343,24940488,-;wlan0: Created a NSS virtual interface
+6,344,24948797,-;br-lan: port 2(wlan0) entered blocking state
+6,345,24948916,-;br-lan: port 2(wlan0) entered disabled state
+6,346,24970665,-;device wlan0 entered promiscuous mode
+6,347,25399794,-;ath11k c000000.wifi: bss color param 0x3a000000 set on vdev 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,348,25402316,-;IPv6: ADDRCONF(NETDEV_CHANGE): wlan0: link becomes ready
+6,349,25407286,-;br-lan: port 2(wlan0) entered blocking state
+6,350,25412025,-;br-lan: port 2(wlan0) entered forwarding state
+3,351,25622059,-;debugfs: File 'virt_if' in directory 'stats' already present!
+6,352,25622499,-;wlan1: Created a NSS virtual interface
+6,353,25637464,-;br-lan: port 3(wlan1) entered blocking state
+6,354,25637496,-;br-lan: port 3(wlan1) entered disabled state
+6,355,25643946,-;device wlan1 entered promiscuous mode
+6,356,25653724,-;br-lan: port 3(wlan1) entered blocking state
+6,357,25653762,-;br-lan: port 3(wlan1) entered forwarding state
+6,358,25947805,-;br-lan: port 3(wlan1) entered disabled state
+6,359,26447607,-;ath11k soc:wifi1@c000000: bss color param 0x21000000 set on vdev 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+6,360,26450700,-;IPv6: ADDRCONF(NETDEV_CHANGE): wlan1: link becomes ready
+6,361,26457313,-;br-lan: port 3(wlan1) entered blocking state
+6,362,26460274,-;br-lan: port 3(wlan1) entered forwarding state
+6,363,33472151,-;pppoe-wan: renamed from ppp0
+6,364,170743344,-;cr_abicheck: ================= net_device ABI check =================
+6,365,170743379,-;cr_abicheck: sizeof(net_device)=1344 NETDEV_ALIGN=32 IFNAMSIZ=16 FIB=15
+6,366,170749896,-;cr_abicheck: offsetof name=0 ifindex=168 mtu=324 min_mtu=328 max_mtu=332
+6,367,170758239,-;cr_abicheck: offsetof type=336 hard_header_len=338 min_header_len=340 addr_len=379
+6,368,170765653,-;cr_abicheck: offsetof flags=308 priv_flags=312 features=112 hw_features=120
+6,369,170774478,-;cr_abicheck: offsetof tx_queue_len=656 state=44 perm_addr=346 dev_addr=464
+6,370,170781875,-;cr_abicheck: offsetof netdev_ops=288 dev_addrs=420 broadcast=504 dev_list=48
+6,371,170790401,-;cr_abicheck: ---- values read through those offsets ----
+6,372,170798173,-;cr_abicheck: name='lo' ifindex=1 mtu=0 min_mtu=0 max_mtu=0
+6,373,170804673,-;cr_abicheck: type=0 hard_header_len=1 min_header_len=0 addr_len=0 tx_queue_len=0
+6,374,170810539,-;cr_abicheck: flags=0x0 priv_flags=0x81af4200 features=0x288401d7c69 hw_features=0x401d4800
+6,375,170819327,-;cr_abicheck: state=0x3 reg_state=0 operstate=0
+6,376,170828479,-;cr_abicheck: netdev_ops=00000000 dev_addr=00000000 perm_addr=000004030e000e00000000000000000000000000000000000000000000000000
+6,377,170833915,-;cr_abicheck:  ok   name == 'lo' (got 'lo')
+6,378,170847789,-;cr_abicheck:  ok   ifindex == 1 (got 1)
+3,379,170851163,-;cr_abicheck:  FAIL lo mtu == 65536 (got 0)
+3,380,170856189,-;cr_abicheck:  FAIL lo type == ARPHRD_LOOPBACK/772 (got 0)
+3,381,170861255,-;cr_abicheck:  FAIL lo addr_len == 6 (got 0)
+3,382,170868024,-;cr_abicheck:  FAIL lo hard_header_len == 14 (got 1)
+3,383,170872660,-;cr_abicheck:  FAIL lo min_header_len == 14 (got 0)
+3,384,170878918,-;cr_abicheck:  FAIL lo flags == IFF_LOOPBACK/0x8 (got 0x0)
+3,385,170884717,-;cr_abicheck:  FAIL lo tx_queue_len == 1000 (got 0)
+6,386,170891057,-;cr_abicheck:  ok   lo min_mtu == 0 (got 0)
+3,387,170896993,-;cr_abicheck:  FAIL lo max_mtu == 65536 (got 0)
+3,388,170902110,-;cr_abicheck:  FAIL lo reg_state == NETREG_REGISTERED/1 (got 0)
+6,389,170907804,-;cr_abicheck:  ok   lo operstate is sane (got 0)
+3,390,170914399,-;cr_abicheck:  FAIL dev_addr is a plausible ARM kernel pointer (got 00000000)
+6,391,170919641,-;cr_abicheck: dev_addrs.list.next=8f8319a4 count=0 -> expected dev_addr=8f8319ac, actual=0
+3,392,170928224,-;cr_abicheck:  FAIL dev_addr == dev_addrs.list.next + 8 (RELATIONAL: both late offsets correct)
+3,393,170937544,-;cr_abicheck:  FAIL dev_addrs.count == 1 for lo (got 0)
+6,394,170946904,-;cr_abicheck: info uc.count=0 mc.count=0 (not part of the verdict)
+6,395,170952969,-;cr_abicheck: ---- raw dump of the lo struct (1344 bytes) ----
+6,396,170960077,-;cr_abicheck: 00000000: 00006f6c 00000000 00000000 00000000
+6,397,170966953,-;cr_abicheck: 00000010: 00000000 8f98683c 00000000 00000000
+6,398,170973406,-;cr_abicheck: 00000020: 00000000 00000000 00000000 00000003
+6,399,170980021,-;cr_abicheck: 00000030: 8e8c8030 81d31a60 8f831838 8f831838
+6,400,170986617,-;cr_abicheck: 00000040: 8f831840 8f831840 8f831848 8f831848
+6,401,170992970,-;cr_abicheck: 00000050: 8f831850 8f831850 8f831858 8f831858
+6,402,170999435,-;cr_abicheck: 00000060: 8f831860 8f831860 8f831868 8f831868
+6,403,171006271,-;cr_abicheck: 00000070: 401d7c69 00000288 401d4800 00000000
+6,404,171012501,-;cr_abicheck: 00000080: 401d4800 00000000 00000020 00000000
+6,405,171018982,-;cr_abicheck: 00000090: 10000001 00000000 00000001 00000000
+6,406,171025506,-;cr_abicheck: 000000a0: 00000000 00000000 00000001 00000000
+6,407,171031818,-;cr_abicheck: 000000b0: 00000000 00000000 00000000 00000000
+6,408,171038759,-;cr_abicheck: 000000c0: 00000000 00000000 00000000 00000000
+6,409,171045018,-;cr_abicheck: 000000d0: 00000000 00000000 00000000 00000000
+6,410,171051378,-;cr_abicheck: 000000e0: 00000000 00000000 00000000 00000000
+6,411,171058082,-;cr_abicheck: 000000f0: 00000000 00000000 00000000 00000000
+6,412,171066258,-;cr_abicheck: 00000100: 00000000 00000000 00000000 00000000
+6,413,171071453,-;cr_abicheck: 00000110: 00000000 00000000 00000000 00000000
+6,414,171077685,-;cr_abicheck: 00000120: 00000000 00000000 81ac8554 81ac8448
+6,415,171084053,-;cr_abicheck: 00000130: 00000000 00000000 81af4200 00000009
+6,416,171090490,-;cr_abicheck: 00000140: 00088000 00000000 00000000 00000000
+6,417,171097563,-;cr_abicheck: 00000150: 00010000 00000000 00000000 000e0304
+6,418,171110756,-;cr_abicheck: 00000160: 0000000e 00000000 00000000 00000000
+6,419,171110783,-;cr_abicheck: 00000170: 00000000 00000000 00000000 00000000
+6,420,171117236,-;cr_abicheck: 00000180: 00000000 06000000 00000101 00000000
+6,421,171122897,-;cr_abicheck: 00000190: 00030003 00000000 8f831998 8f831998
+6,422,171129665,-;cr_abicheck: 000001a0: 00000000 8f8319a4 8f8319a4 00000000
+6,423,171136326,-;cr_abicheck: 000001b0: 8f036740 8f036740 00000001 00000000
+6,424,171142431,-;cr_abicheck: 000001c0: 00000000 00000000 00000000 00000000
+6,425,171149186,-;cr_abicheck: 000001d0: 00000000 00000000 00000000 8f0368c0
+6,426,171156144,-;cr_abicheck: 000001e0: 00000000 00000000 00000000 8f032800
+6,427,171162014,-;cr_abicheck: 000001f0: 8ecaec00 00000000 00000000 8f036748
+6,428,171169193,-;cr_abicheck: 00000200: 8f992a80 00000001 00000001 00000000
+6,429,171176488,-;cr_abicheck: 00000210: 00000000 00000000 00000000 00000000
+6,430,171181544,-;cr_abicheck: 00000220: 00000000 00000000 00000000 00000000
+6,431,171188569,-;cr_abicheck: 00000230: 00000000 00000000 00000000 00000000
+6,432,171195098,-;cr_abicheck: 00000240: 00000000 00000000 00000000 8f986c04
+6,433,171201090,-;cr_abicheck: 00000250: 00000000 00000000 00000000 00000000
+6,434,171208016,-;cr_abicheck: 00000260: 00000000 00000000 00000000 00000000
+6,435,171214547,-;cr_abicheck: 00000270: 00000000 00000000 00000000 00000000
+6,436,171220831,-;cr_abicheck: 00000280: 8f032200 00000001 00000001 86e84d00
+6,437,171227359,-;cr_abicheck: 00000290: 00000000 00000000 00000000 00000000
+6,438,171233789,-;cr_abicheck: 000002a0: 00000000 00000000 00000000 00000000
+6,439,171240205,-;cr_abicheck: 000002b0: 00000000 00000000 00000000 00000000
+6,440,171246957,-;cr_abicheck: 000002c0: 00000000 00000000 00000000 00000000
+6,441,171253386,-;cr_abicheck: 000002d0: 000003e8 00000000 00000000 00000000
+6,442,171259680,-;cr_abicheck: 000002e0: 00000000 00000000 00000000 00000000
+6,443,171266353,-;cr_abicheck: 000002f0: 81849cf8 00000000 81c45994 00000000
+6,444,171273212,-;cr_abicheck: 00000300: 00000000 8f831b04 8f831b04 00000001
+6,445,171279233,-;cr_abicheck: 00000310: 00000001 81716f20 81d31a00 00000000
+6,446,171287434,-;cr_abicheck: 00000320: 00000000 81c45ac0 8f036780 8f99ac04
+6,447,171292204,-;cr_abicheck: 00000330: 8f99aa0c 8f0367c0 8f821200 81d24068
+6,448,171299206,-;cr_abicheck: 00000340: 8f033720 00000003 00000007 00000000
+6,449,171305477,-;cr_abicheck: 00000350: 8f992b00 00000000 00000000 00000000
+6,450,171311964,-;cr_abicheck: 00000360: 00000000 8f831800 00000000 00000000
+6,451,171318682,-;cr_abicheck: 00000370: 00000000 00000000 8f831b78 8f831b78
+6,452,171325030,-;cr_abicheck: 00000380: 8f831b80 8f831b80 8f831b88 8f831b88
+6,453,171331301,-;cr_abicheck: 00000390: 00000000 00000000 00000000 00000104
+6,454,171337976,-;cr_abicheck: 000003a0: 00000000 00020002 8f99ac80 8f99aa88
+6,455,171344465,-;cr_abicheck: 000003b0: ffffffff 00010001 8f831bb8 8f831bb8
+6,456,171351042,-;cr_abicheck: 000003c0: 00000000 00000004 8f831bc8 00000000
+6,457,171357557,-;cr_abicheck: 000003d0: 00000000 00000000 00000000 00000000
+6,458,171364141,-;cr_abicheck: 000003e0: 00000000 00000000 816b39bc 8fd79680
+6,459,171370502,-;cr_abicheck: 000003f0: 01000000 00000000 00000000 00000000
+6,460,171377323,-;cr_abicheck: 00000400: ffffffe0 8f831c04 8f831c04 816b40a0
+6,461,171383621,-;cr_abicheck: 00000410: 00000000 8f831c14 8f831c14 00000000
+6,462,171390264,-;cr_abicheck: 00000420: 00000000 00000000 00002081 00000000
+6,463,171397858,-;cr_abicheck: 00000430: 00000000 00000002 00000000 00000000
+6,464,171403359,-;cr_abicheck: 00000440: 00000000 00000000 00000000 00000000
+6,465,171409421,-;cr_abicheck: 00000450: 00000000 00000000 00000000 00000000
+6,466,171416365,-;cr_abicheck: 00000460: 00000000 00000000 00000000 00000000
+6,467,171422653,-;cr_abicheck: 00000470: 00000000 00000000 00000000 00000000
+6,468,171429234,-;cr_abicheck: 00000480: 8f831c80 8f831c80 00000000 00000000
+6,469,171436125,-;cr_abicheck: 00000490: 00000000 00000000 00000000 00000000
+6,470,171441922,-;cr_abicheck: 000004a0: 00000000 00000000 8f831ca8 8f831ca8
+6,471,171448767,-;cr_abicheck: 000004b0: 00000000 00000000 00000000 00000000
+6,472,171455317,-;cr_abicheck: 000004c0: 00000000 00000000 00000000 8f831ccc
+6,473,171461440,-;cr_abicheck: 000004d0: 8f831ccc 81b044cc 8f831cf0 00000000
+6,474,171473253,-;cr_abicheck: 000004e0: 00000000 00000000 00000000 00000000
+6,475,171474488,-;cr_abicheck: 000004f0: 81af3460 00000000 00000000 00000000
+6,476,171481043,-;cr_abicheck: 00000500: 00000000 00000000 00010000 0000ffff
+6,477,171488123,-;cr_abicheck: 00000510: 00000000 00000000 00000000 00000000
+6,478,171494362,-;cr_abicheck: 00000520: 00000000 00000000 00000000 00000000
+6,479,171500595,-;cr_abicheck: 00000530: 00000000 00000000 00000000 00000000
+1,480,171508565,-;8<--- cut here ---
+1,481,171513518,-;Unable to handle kernel paging request at virtual address 0e13a000
+1,482,171516560,-;pgd = 29da06ad
+1,483,171523755,-;[0e13a000] *pgd=00000000
+0,484,171526453,-;Internal error: Oops: 5 [#1] PREEMPT SMP ARM
+4,485,171530182,-;Modules linked in: cr_abicheck(+) ath11k_ahb xt_connlimit pppoe ppp_async nf_conncount iptable_nat ath11k_pci ath11k xt_state xt_nat xt_helper xt_conntrack xt_connmark xt_connbytes xt_REDIRECT xt_MASQUERADE xt_FLOWOFFLOAD xt_CT pptp pppox ppp_generic nf_nat nf_flow_table_hw nf_flow_table nf_conntrack_rtcache nf_conntrack_netlink nf_conntrack mac80211 ipt_REJECT cfg80211 xt_time xt_tcpudp xt_socket xt_recent xt_quota xt_pkttype xt_owner xt_multiport xt_mark xt_mac xt_limit xt_iprange xt_comment xt_addrtype xt_TPROXY xt_TCPMSS xt_LOG slhc nf_tproxy_ipv6 nf_tproxy_ipv4 nf_socket_ipv6 nf_socket_ipv4 nf_reject_ipv4 nf_log_ipv4 nf_defrag_ipv6 nf_defrag_ipv4 iptable_raw iptable_mangle iptable_filter ip_tables crc_ccitt compat qca_nss_wifi_meshmgr xt_set ip_set_list_set ip_set_hash_netportnet ip_set_hash_netport ip_set_hash_netnet ip_set_hash_netiface ip_set_hash_net ip_set_hash_mac ip_set_hash_ipportnet ip_set_hash_ipportip ip_set_hash_ipport ip_set_hash_ipmark ip_set_hash_ip
+4,486,171530300,c; ip_set_bitmap_port ip_set_bitmap_ipmac ip_set_bitmap_ip ip_set nfnetlink nf_log_ipv6 nf_log_common ip6table_mangle ip6table_filter ip6_tables ip6t_REJECT x_tables nf_reject_ipv6 ip_gre gre qca_nss_drv qca_nss_dp ip_tunnel tun qca_ssdk gpio_button_hotplug
+4,487,171623409,-;CPU: 0 PID: 4448 Comm: insmod Not tainted 5.4.164 #0
+4,488,171645632,-;Hardware name: Generic DT based system
+4,489,171651896,-;PC is at cr_abicheck_init+0x49c/0x1000 [cr_abicheck]
+4,490,171656492,-;LR is at print_hex_dump+0x12c/0x150
+4,491,171662646,-;pc : [<7f09549c>]    lr : [<815f24d4>]    psr: 60000093
+4,492,171666901,-;sp : 86febdb0  ip : 00000000  fp : 81d04e88
+4,493,171673151,-;r10: 7f0a7000  r9 : 86f5d5c0  r8 : 00000000
+4,494,171678359,-;r7 : 00000000  r6 : 00000540  r5 : 0000000c  r4 : 8f831800
+4,495,171683569,-;r3 : 00000000  r2 : 34008335  r1 : 0e13a000  r0 : 60000013
+4,496,171690169,-;Flags: nZCv  IRQs off  FIQs on  Mode SVC_32  ISA ARM  Segment user
+4,497,171696677,-;Control: 10c0383d  Table: 458c006a  DAC: 00000055
+0,498,171703882,-;Process insmod (pid: 4448, stack limit = 0x7b435c54)
+0,499,171709698,-;Stack: (0x86febdb0 to 0x86fec000)
+0,500,171715773,-;bda0:                                     00000004 8f831800 00000540 00000000
+0,501,171720032,-;bdc0: 86f5d5a4 81d04e88 81d3e014 ffffe000 7f095000 813026c4 00000001 8597f080
+0,502,171728193,-;bde0: 00000002 8597f080 ffe00000 8f801e00 8fe825dc 8597f4c0 8f801e00 8fe825dc
+0,503,171736352,-;be00: 8040003e ffffe000 0001b110 8144b724 00000001 8f801e00 8fe825dc 8597f080
+0,504,171744512,-;be20: 7f0a7000 34008335 7f0a7000 00000002 86cd3700 00000002 00000000 8139ecd8
+0,505,171752672,-;be40: 86febf34 00000002 86febf34 00000002 86f5d580 813a107c 7f0a700c 00007fff
+0,506,171760831,-;be60: 7f0a7000 8139dcb0 86f4a018 7f0a7048 7f0a71e0 7f0a8000 81a35f78 81a35e20
+0,507,171768991,-;be80: 7f0a700c 00000000 81206568 81a35d60 81a35dd0 81d04e88 00000000 00000000
+0,508,171777151,-;bea0: 00000000 00000000 00000000 00000000 00000003 00000003 00002cc0 ffffffff
+0,509,171785310,-;bec0: 8597f4c0 00002cc2 6e72656b 00006c65 00000000 00000000 00000000 00000000
+0,510,171793470,-;bee0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+0,511,171801629,-;bf00: 00000000 34008335 00000080 000028e8 95af18e8 00000000 014848f8 ffffe000
+0,512,171809789,-;bf20: 76f65240 00000080 00000000 813a1400 00000000 95af0317 95af0380 95aef000
+0,513,171817950,-;bf40: 000028e8 95af1488 95af1360 95af0ba4 00003000 00003040 0000283c 00003064
+0,514,171826108,-;bf60: 00000000 00000000 00000000 0000282c 00000019 0000001a 00000012 00000000
+0,515,171834268,-;bf80: 00000010 00000000 00003000 00000000 00000000 00000003 00000080 81301204
+0,516,171842428,-;bfa0: 86fea000 81301000 00000000 00000000 01482010 000028e8 76f65240 00000011
+0,517,171850587,-;bfc0: 00000000 00000000 00000003 00000080 000028e8 00000000 00000020 00000000
+0,518,171858747,-;bfe0: 7e99fcac 7e99fc90 00011e1c 76f1bce8 60000010 01482010 00000000 00000000
+4,519,171866961,-;[<7f09549c>] (cr_abicheck_init [cr_abicheck]) from [<813026c4>] (do_one_initcall+0x84/0x1d8)
+4,520,171875077,-;[<813026c4>] (do_one_initcall) from [<8139ecd8>] (do_init_module+0x5c/0x248)
+4,521,171884620,-;[<8139ecd8>] (do_init_module) from [<813a107c>] (load_module+0x2110/0x2358)
+4,522,171892691,-;[<813a107c>] (load_module) from [<813a1400>] (sys_init_module+0x13c/0x15c)
+4,523,171900416,-;[<813a1400>] (sys_init_module) from [<81301000>] (ret_fast_syscall+0x0/0x50)
+4,524,171908398,-;Exception stack(0x86febfa8 to 0x86febff0)
+4,525,171916643,-;bfa0:                   00000000 00000000 01482010 000028e8 76f65240 00000011
+4,526,171921595,-;bfc0: 00000000 00000000 00000003 00000080 000028e8 00000000 00000020 00000000
+4,527,171929753,-;bfe0: 7e99fcac 7e99fc90 00011e1c 76f1bce8
+0,528,171937911,-;Code: e10f0000 f10c0080 e59432b8 ee1d1f90 (e7932001) 
+4,529,171942947,-;---[ end trace 650bcc266a8bde7e ]---

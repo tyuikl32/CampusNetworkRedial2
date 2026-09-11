@@ -1,0 +1,21 @@
+{
+    "luci-app-campus-redial": {
+        "description": "Campus network redial LuCI permissions",
+        "read": {
+            "uci": [ "campus-redial" ],
+            "ubus": {
+                "campus_redial": [ "status", "logs", "zapret_status", "zapret_hostlist_get" ]
+            },
+            "file": {
+                "/var/run/campus-redial/status.json": [ "read" ],
+                "/var/log/campus-redial.log": [ "read" ]
+            }
+        },
+        "write": {
+            "uci": [ "campus-redial" ],
+            "ubus": {
+                "campus_redial": [ "start", "stop", "test", "redial_once", "clear_stats", "zapret_hostlist_set", "zapret_service" ]
+            }
+        }
+    }
+}

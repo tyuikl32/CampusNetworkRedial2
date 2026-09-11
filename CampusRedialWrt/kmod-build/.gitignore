@@ -1,0 +1,53 @@
+# ============================================================
+#  大件构建输入：不入库，放在仓库外的缓存目录
+#  默认 D:\CampusNetworkRedial\kmod-build-cache
+#  （可用环境变量 CR_KMOD_CACHE 覆盖，见 docs/03-部署-AX3000-自编内核模块.md）
+#
+#  这些文件合计约 1.9 GB：QSDK 内核源码归档(166MB)、上游内核源码树/归档(910MB+109MB)、
+#  Bootlin ARMv7 交叉工具链(626MB+132MB)。它们都能按文档重新下载/解包。
+# ============================================================
+qsdk/
+linux-5.4.164/
+linux-5.4.164.tar.xz
+armv7-toolchain.tar.bz2
+armv7-eabihf--glibc--stable-*/
+armv7-gcc.tar.xz
+disasm/
+out/
+probe-local/
+console-ocr.png
+
+# ============================================================
+#  可再生的中间产物（脚本会重新生成）
+# ============================================================
+out-*/*.asm
+out-*/*.log
+out-*/*.sorted
+__pycache__/
+*.pyc
+
+# ============================================================
+#  从实机 dump 的厂商模块（第三方二进制，不入库）
+#  需要时自行取回：
+#    ssh root@<路由器> 'cat /lib/modules/5.4.164/tun.ko'    > vendor/tun.ko
+#    ssh root@<路由器> 'cat /lib/modules/5.4.164/ip_gre.ko' > vendor/ip_gre.ko
+#    ssh root@<路由器> 'cat /lib/modules/5.4.164/pppox.ko'  > vendor/pppox.ko
+# ============================================================
+vendor/*.ko
+
+# ============================================================
+#  可重新下载的 feed 索引与第三方包解包目录
+# ============================================================
+hzyitc-Packages.txt
+pkg/Packages.txt
+pkg/Packages.gz
+pkg/core.txt
+pkg/core.gz
+pkg/base.txt
+pkg/base.gz
+pkg/x-*/
+pkg/mwan3-x/
+pkg/kmod-nfnetlink-queue/
+pkg/kmod-ipt-nfqueue/
+pkg/*.ipk.ar
+pkg/ipopt-plain.ipk

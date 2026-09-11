@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# PPPoE credentials are stored in UCI and must not be world-readable.
+[ -f /etc/config/campus-redial ] && chmod 600 /etc/config/campus-redial
+[ -x /etc/init.d/campus-redial ] && /etc/init.d/campus-redial enable
+exit 0

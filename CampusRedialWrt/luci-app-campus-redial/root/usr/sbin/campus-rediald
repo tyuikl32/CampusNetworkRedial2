@@ -1,0 +1,1908 @@
+#!/bin/sh
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+
+# UCI credentials are deliberately kept private.  Package managers normally
+# install /etc/config files as 0644; tighten the mode again at runtime so an
+# accidental LuCI/backend permission change cannot expose the PPPoE password.
+[ -f /etc/config/campus-redial ] && chmod 600 /etc/config/campus-redial 2>/dev/null || true
+
+RUN_DIR=/var/run/campus-redial
+DATA_DIR=/etc/campus-redial
+STATUS_FILE=$RUN_DIR/status.json
+CONTROL_FILE=$RUN_DIR/control
+LOG_FILE=/var/log/campus-redial.log
+STATS_FILE=$DATA_DIR/stats.json
+LAST_FILE=$DATA_DIR/last-run.json
+NETWORK_STATE_FILE=$DATA_DIR/main-network-state
+FIREWALL_STATE_FILE=$DATA_DIR/firewall-managed-networks
+BIND_LIBRARY=/usr/lib/campus-redial-bind.so
+MAX_POOL_SESSIONS=24
+ACCOUNT_DIR=$RUN_DIR/accounts
+ACCOUNT_MAP=$RUN_DIR/account-map
+
+mkdir -p "$RUN_DIR" "$DATA_DIR" /var/log
+chmod 700 "$RUN_DIR" "$DATA_DIR"
+touch "$LOG_FILE"
+chmod 600 "$LOG_FILE"
+printf '%s\n' "$$" > "$RUN_DIR/daemon.pid"
+# Interrupted speed runs leave multi-megabyte blobs on the /tmp tmpfs; a full
+# tmpfs is what breaks the next status write. Reclaim them at startup.
+rm -f "$RUN_DIR"/speed.*.bin "$RUN_DIR"/speed.*.pids 2>/dev/null || true
+
+RUNNING=0
+WORKER=
+STOP_REQUESTED=0
+STATE=idle
+LAST_ERROR=
+NORMAL_RESULT=waiting
+MBPS_RESULT=waiting
+SPEED_VALUE=0
+DIAL_ATTEMPTS=0
+REDIAL_COUNT=0
+RUN_SUCCESS=0
+RUN_FAILURE=0
+STATS_RECORDED=0
+# Pool defaults, refreshed by load_pool_config().
+POOL_SIZE=1
+POOL_KEEPALIVE=1
+AUTH_INTERVAL=60
+BUSY_KBYTES=0
+LAST_AUTH_TS=0
+
+safe_text() {
+	printf '%s' "${1:-}" | tr '\r\n\t' '   ' | sed 's/["\\]/_/g'
+}
+
+json_num() {
+	case "${1:-}" in
+		''|*[!0-9.]*) printf '0' ;;
+		*) awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/) }' >/dev/null 2>&1 && printf '%s' "$1" || printf '0' ;;
+	esac
+}
+
+log_msg() {
+	printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$(safe_text "$*")" >> "$LOG_FILE"
+	if [ "$(wc -c < "$LOG_FILE")" -gt 131072 ]; then
+		tmp_log=$(atomic_tmp "$LOG_FILE")
+		tail -n 400 "$LOG_FILE" > "$tmp_log" && mv -f "$tmp_log" "$LOG_FILE"
+		rm -f "$tmp_log"
+	fi
+}
+
+atomic_tmp() {
+	target=$1
+	tmp=$(mktemp "${target}.XXXXXX" 2>/dev/null) && { printf '%s\n' "$tmp"; return 0; }
+	printf '%s.%s.%s\n' "$target" "$$" "$(date +%s)"
+}
+
+wait_seconds() {
+	seconds=${1:-0}
+	case "$seconds" in ''|*[!0-9]*) return 1 ;; esac
+	while [ "$seconds" -gt 0 ]; do
+		[ "$STOP_REQUESTED" -eq 0 ] || return 1
+		sleep 1
+		seconds=$((seconds - 1))
+	done
+	return 0
+}
+
+uci_get() {
+	uci -q get "campus-redial.main.$1" 2>/dev/null || true
+}
+
+validate_uint() {
+	case "${1:-}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "$1" -ge "$2" ] 2>/dev/null && [ "$1" -le "$3" ] 2>/dev/null
+}
+
+validate_ufloat() {
+	case "${1:-}" in
+		''|*[!0-9.]*) return 1 ;;
+	esac
+	awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/) }' >/dev/null 2>&1 || return 1
+	awk -v value="$1" -v minimum="$2" -v maximum="$3" \
+		'BEGIN { exit !(value >= minimum && value <= maximum) }' >/dev/null 2>&1
+}
+
+validate_url() {
+	case "$1" in
+		http://*|https://*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+uci_account_get() {
+	uci -q get "campus-redial.$1.$2" 2>/dev/null || true
+}
+
+account_id_valid() {
+	case "${1:-}" in
+		''|*[!a-zA-Z0-9_-]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+account_file() {
+	printf '%s/%s.%s' "$ACCOUNT_DIR" "$2" "$1"
+}
+
+account_map_id() {
+	awk -F '|' -v session="$1" '$1 == session { print $2; exit }' "$ACCOUNT_MAP" 2>/dev/null || true
+}
+
+account_map_label() {
+	id=$(account_map_id "$1")
+	[ -n "$id" ] || id=legacy
+	cat "$(account_file label "$id")" 2>/dev/null || printf '%s' "$id"
+}
+
+load_session_credentials() {
+	session_name=$1
+	account_id=$(account_map_id "$session_name")
+	[ -n "$account_id" ] || account_id=legacy
+	if [ "$account_id" = legacy ]; then
+		PPPOE_USERNAME=$(uci_get pppoe_username)
+		PPPOE_PASSWORD=$(uci_get pppoe_password)
+		SESSION_ACCOUNT_ID=legacy
+		SESSION_ACCOUNT_LABEL=$(uci_get pppoe_username)
+	else
+		PPPOE_USERNAME=$(cat "$(account_file username "$account_id")" 2>/dev/null || true)
+		PPPOE_PASSWORD=$(cat "$(account_file password "$account_id")" 2>/dev/null || true)
+		SESSION_ACCOUNT_ID=$account_id
+		SESSION_ACCOUNT_LABEL=$(account_map_label "$session_name")
+	fi
+	[ -n "$PPPOE_USERNAME" ] || { LAST_ERROR="账号 ${SESSION_ACCOUNT_LABEL:-$account_id} 的用户名为空"; return 1; }
+	[ -n "$PPPOE_PASSWORD" ] || { LAST_ERROR="账号 ${SESSION_ACCOUNT_LABEL:-$account_id} 的密码为空"; return 1; }
+	return 0
+}
+
+load_accounts() {
+	# Build a private session -> account map.  Passwords never enter the map or
+	# status JSON; they are kept in one 0600 file per account under RUN_DIR.
+	mkdir -p "$ACCOUNT_DIR" || { LAST_ERROR='无法创建账号运行目录'; return 1; }
+	chmod 700 "$ACCOUNT_DIR" 2>/dev/null || true
+	rm -f "$ACCOUNT_DIR"/*.username "$ACCOUNT_DIR"/*.password "$ACCOUNT_DIR"/*.label 2>/dev/null || true
+	: > "$ACCOUNT_MAP"
+	chmod 600 "$ACCOUNT_MAP" 2>/dev/null || true
+	ACCOUNT_MODE=legacy
+	ACCOUNT_TOTAL=0
+	account_seen=0
+	[ -n "${WAN_INTERFACE:-}" ] || WAN_INTERFACE=$(uci_get wan_interface)
+	[ -n "${WAN_INTERFACE:-}" ] || WAN_INTERFACE=wan
+	account_sections=$(uci -q show campus-redial 2>/dev/null | sed -n 's/^campus-redial\.\([^.=]*\)=account$/\1/p')
+	for account_id in $account_sections; do
+		account_id_valid "$account_id" || { LAST_ERROR="账号 section 名非法：$account_id"; return 1; }
+		enabled=$(uci_account_get "$account_id" enabled)
+		[ "$enabled" = 0 ] && continue
+		account_user=$(uci_account_get "$account_id" username)
+		account_pass=$(uci_account_get "$account_id" password)
+		# Empty template rows are harmless; a partially filled row is not.
+		[ -n "$account_user" ] || [ -n "$account_pass" ] || continue
+		[ -n "$account_user" ] && [ -n "$account_pass" ] || {
+			LAST_ERROR="账号 ${account_id} 必须同时填写用户名和密码"; return 1;
+		}
+		account_max=$(uci_account_get "$account_id" max_connections)
+		[ -n "$account_max" ] || account_max=1
+		validate_uint "$account_max" 1 "$MAX_POOL_SESSIONS" || {
+			LAST_ERROR="账号 ${account_id} 的最大连接数必须为 1..$MAX_POOL_SESSIONS"; return 1;
+		}
+		account_label=$(uci_account_get "$account_id" label)
+		[ -n "$account_label" ] || account_label=$account_id
+		printf '%s' "$account_user" > "$(account_file username "$account_id")"
+		printf '%s' "$account_pass" > "$(account_file password "$account_id")"
+		printf '%s' "$account_label" > "$(account_file label "$account_id")"
+		chmod 600 "$(account_file username "$account_id")" "$(account_file password "$account_id")" "$(account_file label "$account_id")" 2>/dev/null || true
+		account_seen=1
+		i=1
+		while [ "$i" -le "$account_max" ]; do
+			session_index=$((ACCOUNT_TOTAL + i))
+			[ "$session_index" -le "$MAX_POOL_SESSIONS" ] || {
+				LAST_ERROR="账号连接配额总和不能超过 $MAX_POOL_SESSIONS"; return 1;
+			}
+			[ "$session_index" -eq 1 ] && session_name=$WAN_INTERFACE || session_name="wan$session_index"
+			printf '%s|%s\n' "$session_name" "$account_id" >> "$ACCOUNT_MAP"
+			i=$((i + 1))
+		done
+		ACCOUNT_TOTAL=$((ACCOUNT_TOTAL + account_max))
+	done
+	if [ "$account_seen" -eq 1 ]; then
+		ACCOUNT_MODE=multi
+		POOL_SIZE=$ACCOUNT_TOTAL
+		return 0
+	fi
+	# Backward-compatible single-account configuration.
+	PPPOE_USERNAME=$(uci_get pppoe_username)
+	PPPOE_PASSWORD=$(uci_get pppoe_password)
+	pool_size=${CONFIG_POOL_SIZE:-$(uci_get pool_size)}
+	[ -n "$pool_size" ] || pool_size=1
+	validate_uint "$pool_size" 1 "$MAX_POOL_SESSIONS" || {
+		LAST_ERROR="连接池会话数必须为 1..$MAX_POOL_SESSIONS"; return 1;
+	}
+	POOL_SIZE=$pool_size
+	printf '%s|legacy\n' "$WAN_INTERFACE" >> "$ACCOUNT_MAP"
+	i=2
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		printf 'wan%s|legacy\n' "$i" >> "$ACCOUNT_MAP"
+		i=$((i + 1))
+	done
+	printf '%s' "$PPPOE_USERNAME" > "$(account_file username legacy)"
+	printf '%s' "$PPPOE_USERNAME" > "$(account_file label legacy)"
+	printf '%s' "$PPPOE_PASSWORD" > "$(account_file password legacy)"
+	chmod 600 "$(account_file username legacy)" "$(account_file password legacy)" "$(account_file label legacy)" 2>/dev/null || true
+}
+
+validate_config() {
+	WAN_INTERFACE=$(uci_get wan_interface)
+	[ -n "$WAN_INTERFACE" ] || WAN_INTERFACE=wan
+	case "$WAN_INTERFACE" in
+		lan|loopback|br-lan|*[!a-zA-Z0-9_-]*) LAST_ERROR="接口名不安全：$WAN_INTERFACE"; return 1 ;;
+	esac
+	NORMAL_ENABLED=$(uci_get normal_enabled); [ "$NORMAL_ENABLED" = 1 ] || NORMAL_ENABLED=0
+	MBPS_ENABLED=$(uci_get mbps200_enabled); [ "$MBPS_ENABLED" = 1 ] || MBPS_ENABLED=0
+	# Both modes may be disabled: the pool still dials and keeps sessions up,
+	# it just never verifies them. Verified stays 0 and mwan3 still carries
+	# traffic, so dial-only operation is a supported configuration.
+	PPPOE_USERNAME=$(uci_get pppoe_username)
+	PPPOE_PASSWORD=$(uci_get pppoe_password)
+	TIMEOUT_SECONDS=$(uci_get timeout_seconds); [ -n "$TIMEOUT_SECONDS" ] || TIMEOUT_SECONDS=4
+	PROBE_COUNT=$(uci_get probe_count); [ -n "$PROBE_COUNT" ] || PROBE_COUNT=3
+	CONFIRM_INTERVAL=$(uci_get confirm_interval_seconds); [ -n "$CONFIRM_INTERVAL" ] || CONFIRM_INTERVAL=12
+	THIRD_INTERVAL=$(uci_get third_interval_seconds); [ -n "$THIRD_INTERVAL" ] || THIRD_INTERVAL=30
+	PAUSE_SECONDS=$(uci_get pause_seconds); [ -n "$PAUSE_SECONDS" ] || PAUSE_SECONDS=2
+	SETTLE_SECONDS=$(uci_get settle_seconds); [ -n "$SETTLE_SECONDS" ] || SETTLE_SECONDS=10
+	MAX_ATTEMPTS=$(uci_get max_attempts); [ -n "$MAX_ATTEMPTS" ] || MAX_ATTEMPTS=99
+	SPEED_SECONDS=$(uci_get bandwidth_test_seconds); [ -n "$SPEED_SECONDS" ] || SPEED_SECONDS=5
+	SPEED_THRESHOLD=$(uci_get bandwidth_threshold_mbps); [ -n "$SPEED_THRESHOLD" ] || SPEED_THRESHOLD=150
+	SPEED_URL=$(uci_get bandwidth_test_uri); [ -n "$SPEED_URL" ] || SPEED_URL=https://test.xidian.edu.cn/backend/garbage.php
+	validate_uint "$TIMEOUT_SECONDS" 1 60 || { LAST_ERROR='探测超时必须为 1..60'; return 1; }
+	validate_uint "$PROBE_COUNT" 1 10 || { LAST_ERROR='探针次数必须为 1..10'; return 1; }
+	validate_uint "$CONFIRM_INTERVAL" 0 300 || { LAST_ERROR='确认间隔必须为 0..300'; return 1; }
+	validate_uint "$THIRD_INTERVAL" 0 600 || { LAST_ERROR='第三轮间隔必须为 0..600'; return 1; }
+	validate_uint "$PAUSE_SECONDS" 1 600 || { LAST_ERROR='失败暂停必须为 1..600'; return 1; }
+	validate_uint "$SETTLE_SECONDS" 0 300 || { LAST_ERROR='稳定等待必须为 0..300'; return 1; }
+	validate_uint "$MAX_ATTEMPTS" 1 99 || { LAST_ERROR='最大次数必须为 1..99'; return 1; }
+	validate_uint "$SPEED_SECONDS" 1 30 || { LAST_ERROR='测速时长必须为 1..30'; return 1; }
+	validate_ufloat "$SPEED_THRESHOLD" 0 100000 || { LAST_ERROR='测速阈值必须为 0..100000 的数字'; return 1; }
+	validate_url "$SPEED_URL" || { LAST_ERROR='测速地址必须为 HTTP 或 HTTPS'; return 1; }
+	CONFIG_POOL_SIZE=$(uci_get pool_size); [ -n "$CONFIG_POOL_SIZE" ] || CONFIG_POOL_SIZE=1
+	CONFIG_POOL_KEEPALIVE=$(uci_get pool_keepalive); [ -n "$CONFIG_POOL_KEEPALIVE" ] || CONFIG_POOL_KEEPALIVE=1
+	CONFIG_AUTH_INTERVAL=$(uci_get auth_interval_seconds); [ -n "$CONFIG_AUTH_INTERVAL" ] || CONFIG_AUTH_INTERVAL=60
+	CONFIG_BUSY_KBYTES=$(uci_get busy_threshold_kbytes); [ -n "$CONFIG_BUSY_KBYTES" ] || CONFIG_BUSY_KBYTES=0
+	validate_uint "$CONFIG_POOL_SIZE" 1 "$MAX_POOL_SESSIONS" || { LAST_ERROR="连接池会话数必须为 1..$MAX_POOL_SESSIONS"; return 1; }
+	case "$CONFIG_POOL_KEEPALIVE" in 0|1) ;; *) LAST_ERROR='持续维护连接池必须为 0 或 1'; return 1 ;; esac
+	validate_uint "$CONFIG_AUTH_INTERVAL" 1 600 || { LAST_ERROR='认证最小间隔必须为 1..600 秒'; return 1; }
+	validate_uint "$CONFIG_BUSY_KBYTES" 0 100000000 || { LAST_ERROR='大流量阈值必须为 0..100000000 KB/s'; return 1; }
+	load_accounts || return 1
+	if [ "$ACCOUNT_MODE" = legacy ]; then
+		[ -n "$PPPOE_USERNAME" ] || { LAST_ERROR='PPPoE 用户名为空'; return 1; }
+		[ -n "$PPPOE_PASSWORD" ] || { LAST_ERROR='PPPoE 密码为空'; return 1; }
+	fi
+	DEVICE=$(uci_get wan_device)
+	current_proto=$(uci -q get "network.$WAN_INTERFACE.proto" 2>/dev/null || true)
+	[ "$current_proto" = pppoe ] || { LAST_ERROR="接口 $WAN_INTERFACE 不是 PPPoE（当前协议：${current_proto:-未设置}）"; return 1; }
+	[ -n "$DEVICE" ] || DEVICE=$(uci -q get "network.$WAN_INTERFACE.device" 2>/dev/null || true)
+	[ -n "$DEVICE" ] || DEVICE=$(uci -q get "network.$WAN_INTERFACE.ifname" 2>/dev/null || true)
+	[ -n "$DEVICE" ] || { LAST_ERROR="接口 $WAN_INTERFACE 没有下层设备"; return 1; }
+	case "$DEVICE" in
+		*[!a-zA-Z0-9_.:-]*) LAST_ERROR="下层设备名称不安全：$DEVICE"; return 1 ;;
+	esac
+	LAN_DEVICE=$(uci -q get network.lan.device 2>/dev/null || true)
+	[ "$DEVICE" != br-lan ] && [ "$DEVICE" != "$LAN_DEVICE" ] || { LAST_ERROR="拒绝使用 LAN 设备 $DEVICE"; return 1; }
+	case "$DEVICE" in
+		br-*|wlan*|radio*) LAST_ERROR="拒绝使用桥接或无线设备 $DEVICE"; return 1 ;;
+	esac
+	# Physical MAC of the WAN device.  Additional PPPoE sessions use the same
+	# untagged device with a per-session lower-device MAC when the platform can
+	# provide one.  The worker never changes the physical NIC MAC.
+	DEVICE_MAC=$(cat "/sys/class/net/$DEVICE/address" 2>/dev/null || true)
+	case "$DEVICE_MAC" in
+		??:??:??:??:??:??) : ;;
+		*) LAST_ERROR="无法读取设备 $DEVICE 的 MAC 地址"; return 1 ;;
+	esac
+	PROBE_URIS=$(uci -q get "campus-redial.main.probe_uri" 2>/dev/null || true)
+	PROBE_COUNT_TOTAL=0
+	# BusyBox uci returns list values as one space-separated string; plain
+	# option values read the same way, so split on whitespace below.
+	for uri in $PROBE_URIS; do
+		validate_url "$uri" || { LAST_ERROR="探针地址非法：$uri"; return 1; }
+		PROBE_COUNT_TOTAL=$((PROBE_COUNT_TOTAL + 1))
+	done
+	[ "$PROBE_COUNT_TOTAL" -gt 0 ] || { LAST_ERROR='至少需要一个探针地址'; return 1; }
+}
+
+# ---------------------------------------------------------------------------
+# Session bookkeeping. Each session keeps a small state file under
+# $RUN_DIR/session.<name> with key=value lines so pool workers can persist
+# across restarts and the status writer can aggregate them.
+# ---------------------------------------------------------------------------
+
+session_file() { printf '%s/session.%s' "$RUN_DIR" "$1"; }
+
+session_get() {
+	f=$(session_file "$1")
+	[ -r "$f" ] || return 0
+	# Values are stored as one-line key=value records.  Avoid eval here: a
+	# probe/error string must never become shell code when status is rendered.
+	grep -m 1 -F "${2}=" "$f" 2>/dev/null | sed "s/^[^=]*=//" || true
+}
+
+session_set() {
+	mkdir -p "$RUN_DIR" "$ACCOUNT_DIR" 2>/dev/null || true
+	f=$(session_file "$1"); shift
+	: > "$f"
+	for kv in "$@"; do
+		printf '%s\n' "$kv" >> "$f"
+	done
+	chmod 600 "$f"
+}
+
+session_connection_count() {
+	# Count forwarded flows through conntrack when available.  The userspace
+	# conntrack command is not present in many minimal images, so inspect the
+	# kernel table directly before falling back to router-local sockets.
+	name=$1
+	dev=$(session_get "$name" dev)
+	[ -n "$dev" ] || { printf '0'; return 0; }
+	ip=$(ip -4 -o addr show dev "$dev" 2>/dev/null | awk 'NR == 1 { split($4, a, "/"); print a[1]; exit }')
+	[ -n "$ip" ] || { printf '0'; return 0; }
+	if command -v conntrack >/dev/null 2>&1; then
+		count=$(conntrack -L 2>/dev/null | awk -v ip="$ip" '
+			{ for (i = 1; i <= NF; i++) if ($i == "src=" ip || $i == "dst=" ip) { n++; next } }
+			END { print n + 0 }')
+		case "$count" in ''|*[!0-9]*) count=0 ;; esac
+		printf '%s' "$count"
+		return 0
+	fi
+	if [ -r /proc/net/nf_conntrack ]; then
+		count=$(awk -v ip="$ip" '
+			{ for (i = 1; i <= NF; i++) if ($i == "src=" ip || $i == "dst=" ip) { n++; next } }
+			END { print n + 0 }' /proc/net/nf_conntrack 2>/dev/null)
+		case "$count" in ''|*[!0-9]*) count=0 ;; esac
+		printf '%s' "$count"
+		return 0
+	fi
+	if command -v ss >/dev/null 2>&1; then
+		# This is only a router-local fallback; forwarded NAT flows are counted
+		# above from conntrack. Include both TCP and UDP sockets when available.
+		count=$( {
+			ss -Htan state established 2>/dev/null
+			ss -Huan 2>/dev/null
+		} | awk 'NF >= 1 { n++ } END { print n + 0 }')
+		case "$count" in ''|*[!0-9]*) count=0 ;; esac
+		printf '%s' "$count"
+		return 0
+	fi
+	printf '0'
+}
+
+session_traffic() {
+	# Return rx_bytes|tx_bytes|rx_mbps|tx_mbps|connections. Rates use the
+	# previous status sample and remain best-effort on minimal OpenWrt images.
+	name=$1; dev=$(session_get "$name" dev)
+	rx=0; tx=0; rx_rate=0; tx_rate=0
+	if [ -n "$dev" ] && [ -d "/sys/class/net/$dev/statistics" ]; then
+		rx=$(cat "/sys/class/net/$dev/statistics/rx_bytes" 2>/dev/null || echo 0)
+		tx=$(cat "/sys/class/net/$dev/statistics/tx_bytes" 2>/dev/null || echo 0)
+		case "$rx" in ''|*[!0-9]*) rx=0 ;; esac
+		case "$tx" in ''|*[!0-9]*) tx=0 ;; esac
+		f="$RUN_DIR/traffic.$name"; now=$(date +%s)
+		if [ -r "$f" ]; then
+			IFS='|' read -r old_ts old_rx old_tx < "$f"
+			case "$old_ts" in ''|*[!0-9]*) old_ts=0 ;; esac
+			case "$old_rx" in ''|*[!0-9]*) old_rx=0 ;; esac
+			case "$old_tx" in ''|*[!0-9]*) old_tx=0 ;; esac
+			if [ "$now" -gt "$old_ts" ] && [ "$rx" -ge "$old_rx" ] && [ "$tx" -ge "$old_tx" ]; then
+				dt=$((now - old_ts))
+				rx_rate=$(awk -v d="$((rx - old_rx))" -v t="$dt" 'BEGIN { printf "%.2f", d * 8 / t / 1000000 }')
+				tx_rate=$(awk -v d="$((tx - old_tx))" -v t="$dt" 'BEGIN { printf "%.2f", d * 8 / t / 1000000 }')
+			fi
+		fi
+		# Status can be emitted by more than one worker. Write the sample via an
+		# atomic rename so another writer never parses a truncated line.
+		sample_tmp=$(atomic_tmp "$f")
+		printf '%s|%s|%s\n' "$now" "$rx" "$tx" > "$sample_tmp" && mv -f "$sample_tmp" "$f"
+		rm -f "$sample_tmp"
+		chmod 600 "$f" 2>/dev/null || true
+	fi
+	connections=$(session_connection_count "$name")
+	case "$connections" in ''|*[!0-9]*) connections=0 ;; esac
+	printf '%s|%s|%s|%s|%s' "$rx" "$tx" "$rx_rate" "$tx_rate" "$connections"
+}
+
+write_status() {
+	# The run directory is runtime state and may be removed by an upgrade or a
+	# manual cleanup while a worker is still alive. Recreate it before every
+	# status/traffic write so a transient cleanup cannot kill the pool worker.
+	mkdir -p "$RUN_DIR" "$ACCOUNT_DIR" 2>/dev/null || true
+	chmod 700 "$RUN_DIR" "$ACCOUNT_DIR" 2>/dev/null || true
+	cfg_normal_enabled=$(uci_get normal_enabled); [ "$cfg_normal_enabled" = 1 ] || cfg_normal_enabled=0
+	cfg_mbps_enabled=$(uci_get mbps200_enabled); [ "$cfg_mbps_enabled" = 1 ] || cfg_mbps_enabled=0
+	sessions_json=""
+	speed_n=0
+	speed_total=0
+	normal_ok=0
+	normal_total=0
+	mbps_ok=0
+	mbps_total=0
+	dial_total=0
+	redial_total=0
+	verified_total=0
+	connected_total=0
+	if [ -d "$RUN_DIR" ]; then
+		for sf in "$RUN_DIR"/session.*; do
+			[ -f "$sf" ] || continue
+			base=$(basename "$sf")
+			case "$base" in
+				session."$WAN_INTERFACE"|session.wan[2-9]|session.wan1[0-9]|session.wan2[0-4]) ;;
+				*) continue ;;
+			esac
+			if [ "$base" = "session.$WAN_INTERFACE" ]; then
+				status_num=1
+			else
+				status_num=$(printf '%s' "$base" | sed 's/^session\.wan//')
+				case "$status_num" in ''|*[!0-9]*) continue ;; esac
+			fi
+			[ "$status_num" -le "$POOL_SIZE" ] || continue
+			status_sname=$(session_get "$(printf '%s' "$base" | sed 's/session\.//')" name)
+			[ -n "$status_sname" ] || status_sname=$(basename "$sf" | sed 's/session\.//')
+			status_state=$(session_get "$status_sname" state)
+			status_speed=$(session_get "$status_sname" speed)
+			status_normal=$(session_get "$status_sname" normal)
+			status_mbps=$(session_get "$status_sname" mbps200)
+			status_dial=$(session_get "$status_sname" dial_attempts)
+			status_redial=$(session_get "$status_sname" redial_count)
+			status_success=$(session_get "$status_sname" success_count)
+			status_failure=$(session_get "$status_sname" failure_count)
+			status_normal_pass=$(session_get "$status_sname" normal_pass_count)
+			status_mbps_pass=$(session_get "$status_sname" mbps200_pass_count)
+			status_error=$(session_get "$status_sname" error)
+			status_account=$(session_get "$status_sname" account)
+			[ -n "$status_account" ] || status_account=$(account_map_id "$status_sname")
+			[ -n "$status_account" ] || status_account=legacy
+			status_account_label=$(session_get "$status_sname" account_label)
+			[ -n "$status_account_label" ] || status_account_label=$(account_map_label "$status_sname")
+			status_up=$(session_get "$status_sname" up)
+			status_verified=$(session_get "$status_sname" verified)
+			status_dial_state=$(session_get "$status_sname" dial_state)
+			[ -n "$status_dial_state" ] || { [ "$status_up" = 1 ] && status_dial_state=up || status_dial_state=down; }
+			status_detection_state=$(session_get "$status_sname" detection_state)
+			[ -n "$status_detection_state" ] || { [ "$status_verified" = 1 ] && status_detection_state=passed || status_detection_state=waiting; }
+			status_usable=$(session_get "$status_sname" usable)
+			[ -n "$status_usable" ] || status_usable=$status_up
+			traffic_values=$(session_traffic "$status_sname")
+			IFS='|' read -r status_rx status_tx status_rx_rate status_tx_rate status_connections <<EOF
+$traffic_values
+EOF
+			sessions_json="${sessions_json}{\"name\":\"$(safe_text "$status_sname")\",\"account\":\"$(safe_text "$status_account")\",\"account_label\":\"$(safe_text "$status_account_label")\",\"state\":\"$(safe_text "$status_state")\",\"dial_state\":\"$(safe_text "$status_dial_state")\",\"detection_state\":\"$(safe_text "$status_detection_state")\",\"usable\":$(json_num "$status_usable"),\"up\":$(json_num "$status_up"),\"normal\":\"$(safe_text "$status_normal")\",\"mbps200\":\"$(safe_text "$status_mbps")\",\"speed_mbps\":$(json_num "$status_speed"),\"rx_bytes\":$(json_num "$status_rx"),\"tx_bytes\":$(json_num "$status_tx"),\"rx_mbps\":$(json_num "$status_rx_rate"),\"tx_mbps\":$(json_num "$status_tx_rate"),\"connections\":$(json_num "$status_connections"),\"dial_attempts\":$(json_num "$status_dial"),\"redial_count\":$(json_num "$status_redial"),\"success_count\":$(json_num "$status_success"),\"failure_count\":$(json_num "$status_failure"),\"normal_pass_count\":$(json_num "$status_normal_pass"),\"mbps200_pass_count\":$(json_num "$status_mbps_pass"),\"error\":\"$(safe_text "$status_error")\"},"
+			case "$status_normal" in success) normal_ok=$((normal_ok + 1)) ;; esac
+			case "$status_normal" in disabled) : ;; *) normal_total=$((normal_total + 1)) ;; esac
+			case "$status_mbps" in success) mbps_ok=$((mbps_ok + 1)) ;; esac
+			case "$status_mbps" in disabled) : ;; *) mbps_total=$((mbps_total + 1)) ;; esac
+			case "$status_state" in success|up) dial_total=$((dial_total + 1)) ;; esac
+			[ "$status_verified" = 1 ] && verified_total=$((verified_total + 1))
+			[ "$status_usable" = 1 ] && connected_total=$((connected_total + 1))
+			case "$status_speed" in
+				''|*[!0-9.\-]*) : ;;
+				*) speed_total=$(awk -v a="$speed_total" -v b="$status_speed" 'BEGIN { printf "%.2f", a + b }'); speed_n=$((speed_n + 1)) ;;
+			esac
+		done 2>/dev/null
+	fi
+	sessions_json=${sessions_json%,}
+	[ -n "$sessions_json" ] || sessions_json=""
+	if [ -n "$sessions_json" ]; then sessions_json="[$sessions_json]"; else sessions_json="[]"; fi
+	if [ "$cfg_normal_enabled" -eq 0 ]; then
+		NORMAL_RESULT=disabled
+	elif [ "$normal_total" -gt 0 ] && [ "$normal_ok" -eq "$normal_total" ]; then
+		NORMAL_RESULT=success
+	elif [ "$normal_ok" -gt 0 ]; then
+		NORMAL_RESULT=testing
+	else
+		NORMAL_RESULT=${NORMAL_RESULT:-waiting}
+	fi
+	if [ "$cfg_mbps_enabled" -eq 0 ]; then
+		MBPS_RESULT=disabled
+	elif [ "$mbps_total" -gt 0 ] && [ "$mbps_ok" -eq "$mbps_total" ]; then
+		MBPS_RESULT=success
+	elif [ "$mbps_ok" -gt 0 ]; then
+		MBPS_RESULT=testing
+	else
+		MBPS_RESULT=${MBPS_RESULT:-waiting}
+	fi
+	# aggregate speed: mean of the per-session latest measured speeds
+	agg_speed=0
+	[ "$speed_n" -gt 0 ] && agg_speed=$(awk -v t="$speed_total" -v n="$speed_n" 'BEGIN { if (t > 0) printf "%.2f", t / n; else print 0 }')
+	status_speed=${SPEED_VALUE:-0}
+	[ "$speed_n" -gt 0 ] && status_speed=$agg_speed
+	# Keep the run-level value in sync with the aggregate so last_run and the
+	# persistent statistics report the same speed that the UI currently shows.
+	SPEED_VALUE=$status_speed
+	tmp=$(atomic_tmp "$STATUS_FILE")
+	cat > "$tmp" <<EOF
+{"running":$([ "$RUNNING" -eq 1 ] && echo true || echo false),"state":"$(safe_text "$STATE")","pool_size":$(json_num "$POOL_SIZE"),"connected_count":$(json_num "$connected_total"),"verified_count":$(json_num "$verified_total"),"pool_success_count":$(json_num "$verified_total"),"normal":"$(safe_text "$NORMAL_RESULT")","mbps200":"$(safe_text "$MBPS_RESULT")","speed_mbps":$(json_num "$status_speed"),"dial_attempts":$(json_num "$DIAL_ATTEMPTS"),"redial_count":$(json_num "$REDIAL_COUNT"),"run_success":$(json_num "$RUN_SUCCESS"),"run_failure":$(json_num "$RUN_FAILURE"),"last_error":"$(safe_text "$LAST_ERROR")","sessions":$sessions_json,"updated_at":"$(date '+%Y-%m-%dT%H:%M:%S%z')"}
+EOF
+	# A tmpfs-full write leaves a truncated temp file; mv would then publish a
+	# status.json that the LuCI RPC reports as 状态文件损坏. Only publish when
+	# the buffer flushed and the tail still carries the closing brace (the
+	# heredoc appends a newline, so look at the last few bytes, not one).
+	if [ -s "$tmp" ] && tail -c 8 "$tmp" | grep -q '}'; then
+		mv -f "$tmp" "$STATUS_FILE"
+	else
+		log_msg "write_status: 状态文件写入不完整（/tmp 空间不足？），保留上一次状态"
+		rm -f "$tmp"
+	fi
+}
+
+load_pool_config() {
+	POOL_SIZE=$(uci_get pool_size); [ -n "$POOL_SIZE" ] || POOL_SIZE=1
+	validate_uint "$POOL_SIZE" 1 "$MAX_POOL_SESSIONS" || POOL_SIZE=1
+	POOL_KEEPALIVE=$(uci_get pool_keepalive); [ -n "$POOL_KEEPALIVE" ] || POOL_KEEPALIVE=1
+	case "$POOL_KEEPALIVE" in 0|1) ;; *) POOL_KEEPALIVE=1 ;; esac
+	AUTH_INTERVAL=$(uci_get auth_interval_seconds); [ -n "$AUTH_INTERVAL" ] || AUTH_INTERVAL=60
+	validate_uint "$AUTH_INTERVAL" 1 60 || AUTH_INTERVAL=60
+	BUSY_KBYTES=$(uci_get busy_threshold_kbytes); [ -n "$BUSY_KBYTES" ] || BUSY_KBYTES=0
+	validate_uint "$BUSY_KBYTES" 0 100000000 || BUSY_KBYTES=0
+	# An enabled account list owns the pool size; legacy single-account UCI keeps
+	# the explicit pool_size behavior.
+	load_accounts || return 1
+}
+
+pool_iface() {
+	# All sessions share the existing untagged WAN device.  Session identity is
+	# carried by the interface-level MAC and pppname, not by a VLAN tag (the
+	# campus access port does not pass arbitrary 802.1Q tags).
+	printf '%s' "$DEVICE"
+}
+
+firewall_wan_zone() {
+	zone_index=0
+	while uci -q get "firewall.@zone[$zone_index]" >/dev/null 2>&1; do
+		if [ "$(uci -q get "firewall.@zone[$zone_index].name" 2>/dev/null || true)" = wan ]; then
+			printf '@zone[%s]' "$zone_index"
+			return 0
+		fi
+		zone_index=$((zone_index + 1))
+	done
+	return 1
+}
+
+sync_firewall_pool() {
+	# All app-created PPPoE interfaces must belong to the existing wan zone.
+	# Track only list entries added by this package, so shrink/uninstall never
+	# removes a network the user had already assigned to that zone.
+	[ -f /etc/config/firewall ] || { LAST_ERROR='缺少 /etc/config/firewall'; return 1; }
+	wan_zone=$(firewall_wan_zone) || { LAST_ERROR='找不到名为 wan 的防火墙 zone'; return 1; }
+	desired=$(atomic_tmp "$RUN_DIR/firewall.desired")
+	managed=$(atomic_tmp "$RUN_DIR/firewall.managed")
+	: > "$desired"
+	: > "$managed"
+	i=1
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$i" -eq 1 ] && fw_name=$WAN_INTERFACE || fw_name="wan$i"
+		printf '%s\n' "$fw_name" >> "$desired"
+		i=$((i + 1))
+	done
+	firewall_changed=0
+	if [ -r "$FIREWALL_STATE_FILE" ]; then
+		while IFS= read -r old_name; do
+			case "$old_name" in ''|*[!a-zA-Z0-9_-]*) continue ;; esac
+			if grep -qxF "$old_name" "$desired" 2>/dev/null; then
+				printf '%s\n' "$old_name" >> "$managed"
+			else
+				uci -q del_list "firewall.$wan_zone.network=$old_name" >/dev/null 2>&1 || true
+				firewall_changed=1
+			fi
+		done < "$FIREWALL_STATE_FILE"
+	fi
+	zone_networks=$(uci -q get "firewall.$wan_zone.network" 2>/dev/null || true)
+	while IFS= read -r fw_name; do
+		[ -n "$fw_name" ] || continue
+		case " $zone_networks " in
+			*" $fw_name "*) : ;;
+			*)
+				uci add_list "firewall.$wan_zone.network=$fw_name" || {
+					rm -f "$desired" "$managed"
+					LAST_ERROR="无法把 $fw_name 加入 wan 防火墙 zone"
+					return 1
+				}
+				printf '%s\n' "$fw_name" >> "$managed"
+				zone_networks="$zone_networks $fw_name"
+				firewall_changed=1
+				;;
+		esac
+	done < "$desired"
+	# De-duplicate the tiny ownership list without relying on GNU sort options.
+	owned=$(atomic_tmp "$FIREWALL_STATE_FILE.new")
+	awk '!seen[$0]++ && NF' "$managed" > "$owned"
+	chmod 600 "$owned" 2>/dev/null || true
+	mv -f "$owned" "$FIREWALL_STATE_FILE"
+	rm -f "$desired" "$managed"
+	if [ "$firewall_changed" -eq 1 ]; then
+		uci commit firewall || { LAST_ERROR='无法提交防火墙连接池成员'; return 1; }
+		/etc/init.d/firewall reload >/dev/null 2>&1 || { LAST_ERROR='无法重载防火墙连接池成员'; return 1; }
+		log_msg "防火墙 wan zone 已同步到 $POOL_SIZE 条连接池接口"
+	fi
+	return 0
+}
+
+auth_wait() {
+	# Enforce the campus minimum interval between two authentication events.
+	# Workers run in subshells, so refresh the persisted timestamp on every
+	# call instead of relying on the daemon parent's stale in-memory copy.
+	persisted_auth=$(cat "$RUN_DIR/last_auth" 2>/dev/null || echo 0)
+	case "$persisted_auth" in ''|*[!0-9]*) persisted_auth=0 ;; esac
+	[ "$persisted_auth" -le "$LAST_AUTH_TS" ] || LAST_AUTH_TS=$persisted_auth
+	now=$(date +%s)
+	wait_left=$((LAST_AUTH_TS + AUTH_INTERVAL - now))
+	if [ "$wait_left" -gt 0 ]; then
+		log_msg "认证间隔节流：${wait_left}s 后才允许下一次拨号"
+		wait_seconds "$wait_left" || return 1
+	fi
+	LAST_AUTH_TS=$(date +%s)
+	printf '%s\n' "$LAST_AUTH_TS" > "$RUN_DIR/last_auth"
+	return 0
+}
+
+session_busy() {
+	# Sample the session PPP device counters over one second; returns 0 (busy)
+	# when the throughput exceeds BUSY_KBYTES KB/s and busy detection is on.
+	[ "$BUSY_KBYTES" -gt 0 ] || return 1
+	ifn=$(session_get "$1" dev)
+	[ -n "$ifn" ] || return 1
+	d="/sys/class/net/$ifn/statistics"
+	[ -d "$d" ] || return 1
+	b1=$(( $(cat "$d/rx_bytes" 2>/dev/null || echo 0) + $(cat "$d/tx_bytes" 2>/dev/null || echo 0) ))
+	sleep 1
+	b2=$(( $(cat "$d/rx_bytes" 2>/dev/null || echo 0) + $(cat "$d/tx_bytes" 2>/dev/null || echo 0) ))
+	delta=$((b2 - b1))
+	[ "$delta" -gt $((BUSY_KBYTES * 1024)) ]
+}
+
+bound_fetch() {
+	iface=$1; shift
+	source=$(ip -4 -o addr show dev "$iface" 2>/dev/null | awk 'NR == 1 { split($4, address, "/"); print address[1]; exit }')
+	if [ -r "$BIND_LIBRARY" ]; then
+		CAMPUS_REDIAL_DEVICE="$iface" CAMPUS_REDIAL_SOURCE="$source" \
+			LD_PRELOAD="$BIND_LIBRARY" uclient-fetch "$@"
+		return $?
+	fi
+	# OpenWrt 21.02 development installs have no prebuilt helper; curl binds
+	# the request itself. PPP devices reject SO_BINDTODEVICE, so bind to the
+	# session's negotiated source address instead.
+	if command -v curl >/dev/null 2>&1; then
+		timeout_seconds=
+		outfile=
+		url=
+		while [ "$#" -gt 0 ]; do
+			case "$1" in
+				-q) shift ;;
+				-T) timeout_seconds=$2; shift 2 ;;
+				-O) outfile=$2; shift 2 ;;
+				*) url=$1; shift ;;
+			esac
+		done
+		[ -n "$url" ] || return 125
+		[ -n "$outfile" ] || outfile=/dev/null
+		if [ -n "$timeout_seconds" ]; then time_arg="--max-time $timeout_seconds"; else time_arg=; fi
+		case "$iface" in
+			pppoe-*|ppp-*) bind_arg=$source ;;
+			*) bind_arg=$iface ;;
+		esac
+		if [ -n "$bind_arg" ]; then
+			curl -sS -4 --interface "$bind_arg" $time_arg -o "$outfile" "$url" >/dev/null 2>&1
+		else
+			curl -sS -4 $time_arg -o "$outfile" "$url" >/dev/null 2>&1
+		fi
+		return $?
+	fi
+	return 125
+}
+
+probe_one() {
+	bound_fetch "$2" -q -T "$TIMEOUT_SECONDS" -O /dev/null "$1" >/dev/null 2>&1
+}
+
+interface_up() {
+	result=$(ubus call network.interface status "{\"interface\":\"$WAN_INTERFACE\"}" 2>/dev/null || true)
+	[ "$(printf '%s' "$result" | jsonfilter -e '@.up' 2>/dev/null || true)" = true ]
+}
+load_stats() {
+	TOTAL_DIAL=0; TOTAL_REDIAL=0; TOTAL_SUCCESS=0; TOTAL_FAILURE=0
+	TOTAL_NORMAL=0; TOTAL_MBPS=0; TOTAL_SPEED=0
+	if [ -r "$STATS_FILE" ] && command -v jsonfilter >/dev/null 2>&1; then
+		TOTAL_DIAL=$(jsonfilter -i "$STATS_FILE" -e '@.dial_attempts' 2>/dev/null || echo 0)
+		TOTAL_REDIAL=$(jsonfilter -i "$STATS_FILE" -e '@.redial_count' 2>/dev/null || echo 0)
+		TOTAL_SUCCESS=$(jsonfilter -i "$STATS_FILE" -e '@.success_count' 2>/dev/null || echo 0)
+		TOTAL_FAILURE=$(jsonfilter -i "$STATS_FILE" -e '@.failure_count' 2>/dev/null || echo 0)
+		TOTAL_NORMAL=$(jsonfilter -i "$STATS_FILE" -e '@.normal_pass_count' 2>/dev/null || echo 0)
+		TOTAL_MBPS=$(jsonfilter -i "$STATS_FILE" -e '@.mbps200_pass_count' 2>/dev/null || echo 0)
+		TOTAL_SPEED=$(jsonfilter -i "$STATS_FILE" -e '@.last_speed_mbps' 2>/dev/null || echo 0)
+	fi
+	validate_uint "$TOTAL_DIAL" 0 2147483647 || TOTAL_DIAL=0
+	validate_uint "$TOTAL_REDIAL" 0 2147483647 || TOTAL_REDIAL=0
+	validate_uint "$TOTAL_SUCCESS" 0 2147483647 || TOTAL_SUCCESS=0
+	validate_uint "$TOTAL_FAILURE" 0 2147483647 || TOTAL_FAILURE=0
+	validate_uint "$TOTAL_NORMAL" 0 2147483647 || TOTAL_NORMAL=0
+	validate_uint "$TOTAL_MBPS" 0 2147483647 || TOTAL_MBPS=0
+}
+write_stats() {
+	tmp=$(atomic_tmp "$STATS_FILE")
+	cat > "$tmp" <<EOF
+{"dial_attempts":$(json_num "$TOTAL_DIAL"),"redial_count":$(json_num "$TOTAL_REDIAL"),"success_count":$(json_num "$TOTAL_SUCCESS"),"failure_count":$(json_num "$TOTAL_FAILURE"),"normal_pass_count":$(json_num "$TOTAL_NORMAL"),"mbps200_pass_count":$(json_num "$TOTAL_MBPS"),"last_speed_mbps":$(json_num "$TOTAL_SPEED")}
+EOF
+	mv -f "$tmp" "$STATS_FILE"
+}
+write_last_run() {
+	result=$1
+	# Persist one cumulative record per user-triggered task.  A pool task may
+	# write a successful snapshot and later a stopped snapshot; the guard keeps
+	# that from double-counting the same run.
+	if [ "${STATS_RECORDED:-0}" -eq 0 ]; then
+		load_stats
+		TOTAL_DIAL=$((TOTAL_DIAL + ${DIAL_ATTEMPTS:-0}))
+		TOTAL_REDIAL=$((TOTAL_REDIAL + ${REDIAL_COUNT:-0}))
+		if [ "$result" = success ]; then TOTAL_SUCCESS=$((TOTAL_SUCCESS + 1)); else TOTAL_FAILURE=$((TOTAL_FAILURE + 1)); fi
+		[ "${NORMAL_RESULT:-}" = success ] && TOTAL_NORMAL=$((TOTAL_NORMAL + 1))
+		[ "${MBPS_RESULT:-}" = success ] && TOTAL_MBPS=$((TOTAL_MBPS + 1))
+		case "${SPEED_VALUE:-0}" in ''|*[!0-9.\-]*) ;; *) TOTAL_SPEED=$SPEED_VALUE ;; esac
+		write_stats
+		STATS_RECORDED=1
+	fi
+	tmp=$(atomic_tmp "$LAST_FILE")
+	cat > "$tmp" <<EOF
+{"result":"$(safe_text "$result")","state":"$(safe_text "$STATE")","dial_attempts":$(json_num "$DIAL_ATTEMPTS"),"redial_count":$(json_num "$REDIAL_COUNT"),"normal":"$(safe_text "$NORMAL_RESULT")","mbps200":"$(safe_text "$MBPS_RESULT")","speed_mbps":$(json_num "$SPEED_VALUE"),"error":"$(safe_text "$LAST_ERROR")","updated_at":"$(date '+%Y-%m-%dT%H:%M:%S%z')"}
+EOF
+	mv -f "$tmp" "$LAST_FILE"
+}
+apply_pppoe_config() {
+	log_msg "apply_pppoe_config: enter (wan=$WAN_INTERFACE device=$DEVICE user_set=$([ -n "$PPPOE_USERNAME" ] && echo yes))"
+	backup="/etc/config/network.campus-redial.bak"
+	transaction_backup="$RUN_DIR/network.before-apply"
+	cp /etc/config/network "$transaction_backup" 2>/dev/null || { LAST_ERROR='无法创建 network 事务备份'; log_msg 'apply_pppoe_config: cp transaction backup 失败'; return 1; }
+	chmod 600 "$transaction_backup" 2>/dev/null || { LAST_ERROR='无法设置事务备份权限'; log_msg 'apply_pppoe_config: chmod transaction backup 失败'; return 1; }
+	if [ ! -f "$backup" ]; then
+		cp "$transaction_backup" "$backup" 2>/dev/null || { LAST_ERROR='无法保存初始 network 备份'; log_msg 'apply_pppoe_config: cp persistent backup 失败'; return 1; }
+		chmod 600 "$backup" 2>/dev/null || { LAST_ERROR='无法设置初始备份权限'; log_msg 'apply_pppoe_config: chmod persistent backup 失败'; return 1; }
+	fi
+	network_rollback() {
+		cp "$transaction_backup" /etc/config/network 2>/dev/null || true
+		uci revert network 2>/dev/null || true
+	}
+	old_proto=$(uci -q get "network.$WAN_INTERFACE.proto" 2>/dev/null || true)
+	old_device=$(uci -q get "network.$WAN_INTERFACE.device" 2>/dev/null || true)
+	old_user=$(uci -q get "network.$WAN_INTERFACE.username" 2>/dev/null || true)
+	old_pppname=$(uci -q get "network.$WAN_INTERFACE.pppname" 2>/dev/null || true)
+	old_ipv6=$(uci -q get "network.$WAN_INTERFACE.ipv6" 2>/dev/null || true)
+	old_delegate=$(uci -q get "network.$WAN_INTERFACE.delegate" 2>/dev/null || true)
+	managed_ipv6=$(uci -q get "network.$WAN_INTERFACE.campus_redial_ipv6_managed" 2>/dev/null || true)
+	if ! uci set "network.$WAN_INTERFACE.proto=pppoe"; then
+		LAST_ERROR='无法设置 proto'
+		log_msg 'apply_pppoe_config: proto 写入失败'
+		network_rollback
+		return 1
+	fi
+	if ! uci set "network.$WAN_INTERFACE.device=$DEVICE"; then
+		LAST_ERROR="无法设置 device=$DEVICE"
+		log_msg "apply_pppoe_config: device 写入失败 (DEVICE=[$DEVICE])"
+		network_rollback
+		return 1
+	fi
+	if ! uci set "network.$WAN_INTERFACE.username=$PPPOE_USERNAME"; then
+		LAST_ERROR='无法写入 username'
+		log_msg "apply_pppoe_config: username 写入失败"
+		network_rollback
+		return 1
+	fi
+	if ! uci set "network.$WAN_INTERFACE.password=$PPPOE_PASSWORD"; then
+		LAST_ERROR='无法写入 password'
+		log_msg "apply_pppoe_config: password 写入失败"
+		network_rollback
+		return 1
+	fi
+	if ! uci set "network.$WAN_INTERFACE.pppname=pppoe-$WAN_INTERFACE"; then
+		LAST_ERROR='无法设置 PPP 接口名'
+		log_msg 'apply_pppoe_config: pppname 写入失败'
+		network_rollback
+		return 1
+	fi
+	if [ "${POOL_SIZE:-1}" -gt 1 ]; then
+		# The pool must suppress IPv6 aliases on the shared physical device, but
+		# that is an app-owned temporary change. Keep the user's original values
+		# so returning to pool_size=1 does not silently alter WAN behavior.
+		if [ "$managed_ipv6" != 1 ]; then
+			if ! {
+				printf 'ipv6=%s\n' "$old_ipv6"
+				printf 'delegate=%s\n' "$old_delegate"
+			} > "$NETWORK_STATE_FILE"; then
+				LAST_ERROR='无法保存连接池 IPv6 原始配置'
+				network_rollback
+				return 1
+			fi
+			chmod 600 "$NETWORK_STATE_FILE" 2>/dev/null || true
+			uci set "network.$WAN_INTERFACE.campus_redial_ipv6_managed=1" || {
+				LAST_ERROR='无法标记连接池 IPv6 临时配置'
+				network_rollback
+				return 1
+			}
+		fi
+		if ! uci set "network.$WAN_INTERFACE.ipv6=0" || ! uci set "network.$WAN_INTERFACE.delegate=0"; then
+			LAST_ERROR='无法关闭连接池主会话 IPv6 委派'
+			network_rollback
+			return 1
+		fi
+	elif [ "$managed_ipv6" = 1 ]; then
+		if [ -r "$NETWORK_STATE_FILE" ]; then
+			stored_ipv6=$(grep -m 1 '^ipv6=' "$NETWORK_STATE_FILE" 2>/dev/null | sed 's/^ipv6=//' || true)
+			stored_delegate=$(grep -m 1 '^delegate=' "$NETWORK_STATE_FILE" 2>/dev/null | sed 's/^delegate=//' || true)
+			if [ -n "$stored_ipv6" ]; then uci set "network.$WAN_INTERFACE.ipv6=$stored_ipv6"; else uci -q delete "network.$WAN_INTERFACE.ipv6"; fi
+			if [ -n "$stored_delegate" ]; then uci set "network.$WAN_INTERFACE.delegate=$stored_delegate"; else uci -q delete "network.$WAN_INTERFACE.delegate"; fi
+		else
+			log_msg '连接池 IPv6 状态备份缺失，保留当前 WAN 选项'
+		fi
+		uci -q delete "network.$WAN_INTERFACE.campus_redial_ipv6_managed" || true
+	fi
+	if ! uci commit network; then
+		LAST_ERROR='无法 commit network 配置'
+		log_msg "apply_pppoe_config: uci commit 失败"
+		network_rollback
+		return 1
+	fi
+	rm -f "$transaction_backup"
+	[ "${POOL_SIZE:-1}" -gt 1 ] || rm -f "$NETWORK_STATE_FILE"
+	NETWORK_CHANGED=0
+	[ "$old_proto" = pppoe ] || NETWORK_CHANGED=1
+	[ "$old_device" = "$DEVICE" ] || NETWORK_CHANGED=1
+	[ "$old_user" = "$PPPOE_USERNAME" ] || NETWORK_CHANGED=1
+	[ "$old_pppname" = "pppoe-$WAN_INTERFACE" ] || NETWORK_CHANGED=1
+	if [ "${POOL_SIZE:-1}" -gt 1 ]; then
+		[ "$old_ipv6" = 0 ] || NETWORK_CHANGED=1
+		[ "$old_delegate" = 0 ] || NETWORK_CHANGED=1
+	elif [ "$managed_ipv6" = 1 ]; then
+		NETWORK_CHANGED=1
+	fi
+	return 0
+}
+ifdown_target() { ifdown "$WAN_INTERFACE" >/dev/null 2>&1 || true; }
+ifup_target() { ifup "$WAN_INTERFACE" >/dev/null 2>&1; }
+wait_for_up() {
+	limit=${1:-60}
+	while [ "$limit" -gt 0 ]; do
+		[ "$STOP_REQUESTED" -eq 0 ] || return 1
+		interface_up && return 0
+		sleep 1
+		limit=$((limit - 1))
+	done
+	return 1
+}
+
+# ---------------------------------------------------------------------------
+# Per-session test layer. Each function writes its result into the session
+
+session_init() {
+	# $1 = session name (wan, wan2, ...); initializes state file if missing
+	f=$(session_file "$1")
+	if [ ! -f "$f" ]; then
+		session_set "$1" "name=$1" "state=idle" "up=0" "normal=waiting" "mbps200=waiting" \
+			"speed=0" "dial_attempts=0" "redial_count=0" "success_count=0" "failure_count=0" \
+			"normal_pass_count=0" "mbps200_pass_count=0" "verified=0" "terminal=0" "dev=" \
+			"account=" "account_label=" "dial_state=down" "detection_state=waiting" "usable=0" "error="
+	fi
+}
+
+assign_session_accounts() {
+	# load_accounts has already created an ordered map according to each account's
+	# max_connections.  Persist the owner in every session so restarts and the
+	# LuCI table retain the association without exposing credentials.
+	i=1
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		session_init "$sname"
+		account_id=$(account_map_id "$sname")
+		[ -n "$account_id" ] || account_id=unassigned
+		account_label=$(account_map_label "$sname")
+		[ "$account_id" = unassigned ] && account_label='未分配账号'
+		session_mark "$sname" "account=$account_id" "account_label=$account_label" "terminal=$([ "$account_id" = unassigned ] && echo 1 || echo 0)"
+		i=$((i + 1))
+	done
+}
+
+session_mark() {
+	# session_mark <name> key=value [key=value ...]
+	# The old implementation treated the first assignment as a key and the
+	# second as its value, producing records such as state=up=1.  Update every
+	# assignment atomically and keep the record format boring and parseable.
+	mkdir -p "$RUN_DIR" "$ACCOUNT_DIR" 2>/dev/null || true
+	f=$(session_file "$1"); shift
+	[ -f "$f" ] || : > "$f"
+	tmp=$(atomic_tmp "$f")
+	cp "$f" "$tmp" 2>/dev/null || : > "$tmp"
+	for assignment in "$@"; do
+		key=${assignment%%=*}
+		value=${assignment#*=}
+		case "$key" in
+			''|*[!a-zA-Z0-9_]*) continue ;;
+		esac
+		next=$(atomic_tmp "$tmp.next")
+		awk -v k="$key" -v v="$value" '
+			BEGIN { found = 0 }
+			index($0, k "=") == 1 { if (!found) { print k "=" v; found = 1 }; next }
+			{ print }
+			END { if (!found) print k "=" v }
+		' "$tmp" > "$next" 2>/dev/null || {
+			printf '%s=%s\n' "$key" "$value" >> "$tmp"
+			rm -f "$next"
+			continue
+		}
+		mv -f "$next" "$tmp"
+	done
+	chmod 600 "$tmp" 2>/dev/null || true
+	mv -f "$tmp" "$f"
+}
+
+record_session_attempt() {
+	name=$1
+	is_redial=${2:-0}
+	dials=$(session_get "$name" dial_attempts); case "$dials" in ''|*[!0-9]*) dials=0 ;; esac
+	reds=$(session_get "$name" redial_count); case "$reds" in ''|*[!0-9]*) reds=0 ;; esac
+	dials=$((dials + 1))
+	[ "$is_redial" -eq 1 ] && reds=$((reds + 1))
+	session_mark "$name" "dial_attempts=$dials" "redial_count=$reds"
+	DIAL_ATTEMPTS=$((DIAL_ATTEMPTS + 1))
+	[ "$is_redial" -eq 1 ] && REDIAL_COUNT=$((REDIAL_COUNT + 1))
+}
+
+record_session_result() {
+	name=$1
+	result=$2
+	successes=$(session_get "$name" success_count); case "$successes" in ''|*[!0-9]*) successes=0 ;; esac
+	failures=$(session_get "$name" failure_count); case "$failures" in ''|*[!0-9]*) failures=0 ;; esac
+	normal_passes=$(session_get "$name" normal_pass_count); case "$normal_passes" in ''|*[!0-9]*) normal_passes=0 ;; esac
+	mbps_passes=$(session_get "$name" mbps200_pass_count); case "$mbps_passes" in ''|*[!0-9]*) mbps_passes=0 ;; esac
+	if [ "$result" = success ]; then successes=$((successes + 1)); else failures=$((failures + 1)); fi
+	[ "$(session_get "$name" normal)" = success ] && normal_passes=$((normal_passes + 1))
+	[ "$(session_get "$name" mbps200)" = success ] && mbps_passes=$((mbps_passes + 1))
+	session_mark "$name" "success_count=$successes" "failure_count=$failures" \
+		"normal_pass_count=$normal_passes" "mbps200_pass_count=$mbps_passes"
+}
+
+run_normal_test_session() {
+	# Three-round probes for one session; writes success/failure into $4.
+	name=$1; result_file=$2
+	PROBE_URIS=$(uci -q get "campus-redial.main.probe_uri" 2>/dev/null || true)
+	for round in 1 2 3; do
+		count=0; passed=0
+		for uri in $PROBE_URIS; do
+			index=1
+			while [ "$index" -le "$PROBE_COUNT" ]; do
+				count=$((count + 1))
+				if probe_one "$uri" "$(session_get "$name" dev)"; then
+					passed=$((passed + 1))
+				else
+					log_msg "[$name] 过点模式第 $round 轮探针失败：$uri"
+					printf '%s\n' failure > "$result_file"
+					return 1
+				fi
+				index=$((index + 1))
+			done
+		done
+		log_msg "[$name] 过点模式第 $round 轮：$passed/$count 通过"
+		[ "$count" -gt 0 ] && [ "$passed" -eq "$count" ] || { printf '%s\n' failure > "$result_file"; return 1; }
+		if [ "$round" -eq 1 ] && [ "$CONFIRM_INTERVAL" -gt 0 ]; then
+			wait_seconds "$CONFIRM_INTERVAL" || return 2
+		fi
+		if [ "$round" -eq 2 ] && [ "$THIRD_INTERVAL" -gt 0 ]; then
+			wait_seconds "$THIRD_INTERVAL" || return 2
+		fi
+	done
+	printf '%s\n' success > "$result_file"
+	return 0
+}
+
+cancel_speed_children() {
+	name=$1
+	pfile="$RUN_DIR/speed.$name.pids"
+	[ -r "$pfile" ] || return 0
+	while read -r pid; do
+		case "$pid" in ''|*[!0-9]*) continue ;; esac
+		kill "$pid" 2>/dev/null || true
+	done < "$pfile"
+	rm -f "$pfile"
+}
+
+run_speed_test_session() {
+	# The pool guarantees this is the only running speed test (speed token).
+	# The preload helper binds every download socket to this PPP session (or its
+	# negotiated source address when PPP rejects SO_BINDTODEVICE). The result is
+	# intentionally treated as a routing/health signal, not a lab-grade metric.
+	# Streams never write download blobs to disk: each worker counts its bytes
+	# (curl's size_download, or a pipe to wc for uclient-fetch) into a small
+	# per-stream result file. /var/run is a tiny tmpfs; large blobs there broke
+	# status writes with 状态文件损坏 when the tmpfs filled up.
+	name=$1; result_file=$2; iface=$3
+	: > "$result_file"
+	log_msg "[$name] 高宽测速开始（独占测速令牌）"
+	start=$(date +%s)
+	pids=
+	pfile="$RUN_DIR/speed.$name.pids"
+	: > "$pfile"
+	# Defensive: reclaim blobs from a run interrupted before this rework.
+	rm -f "$RUN_DIR"/speed.*.bin 2>/dev/null || true
+	case "$SPEED_URL" in *\?*) separator='&' ;; *) separator='?' ;; esac
+	source=$(ip -4 -o addr show dev "$iface" 2>/dev/null | awk 'NR == 1 { split($4, address, "/"); print address[1]; exit }')
+	for stream in 1 2 3 4 5 6; do
+		 (
+			if [ -r "$BIND_LIBRARY" ]; then
+				CAMPUS_REDIAL_DEVICE="$iface" CAMPUS_REDIAL_SOURCE="$source" \
+					LD_PRELOAD="$BIND_LIBRARY" uclient-fetch -q -T "$SPEED_SECONDS" -O - \
+					"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null | wc -c
+			elif command -v curl >/dev/null 2>&1; then
+				case "$iface" in
+					pppoe-*|ppp-*) bind_arg=$source ;;
+					*) bind_arg=$iface ;;
+				esac
+				if [ -n "$bind_arg" ]; then
+					curl -sS -4 --interface "$bind_arg" --max-time "$SPEED_SECONDS" \
+						-o /dev/null -w '%{size_download}' \
+						"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+				else
+					curl -sS -4 --max-time "$SPEED_SECONDS" \
+						-o /dev/null -w '%{size_download}' \
+						"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+				fi
+			else
+				printf '0'
+			fi
+		) > "$RUN_DIR/speed.$name.$stream.count" 2>/dev/null &
+		pid=$!
+		pids="$pids $pid"
+		printf '%s\n' "$pid" >> "$pfile"
+	done
+	# Let each worker end on its own --max-time so it can still
+	# emit its byte count; the kill below is only a safety net.
+	sleep $((SPEED_SECONDS + 1))
+	for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+	for pid in $pids; do wait "$pid" 2>/dev/null || true; done
+	rm -f "$pfile"
+	total=0
+	for stream in 1 2 3 4 5 6; do
+		bytes=$(cat "$RUN_DIR/speed.$name.$stream.count" 2>/dev/null || echo 0)
+		case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+		total=$((total + bytes))
+		rm -f "$RUN_DIR/speed.$name.$stream.count"
+	done
+	elapsed=$(( $(date +%s) - start - 1 )); [ "$elapsed" -gt 0 ] || elapsed=1
+	speed=$(awk -v bytes="$total" -v seconds="$elapsed" 'BEGIN { printf "%.2f", bytes * 8 / seconds / 1000000 }' 2>/dev/null || echo 0)
+	printf '%s\n' "$speed" > "$RUN_DIR/speed.$name.value"
+	session_mark "$name" "speed=$speed"
+	log_msg "[$name] 高宽测速完成：$speed Mbps（阈值 $SPEED_THRESHOLD，${SPEED_SECONDS}s 窗口）"
+	write_status
+	if awk -v value="$speed" -v threshold="$SPEED_THRESHOLD" 'BEGIN { exit !(value > threshold) }'; then
+		printf '%s\n' success > "$result_file"
+		return 0
+	fi
+	printf '%s\n' failure > "$result_file"
+	return 1
+}
+
+release_speed_token() {
+	rm -f "$RUN_DIR/speed.token" 2>/dev/null || true
+	rmdir "$RUN_DIR/speed.lock" 2>/dev/null || true
+}
+
+wait_speed_token() {
+	# Block until this pool process holds the exclusive speed-test token.
+	while [ "$STOP_REQUESTED" -eq 0 ]; do
+		if mkdir "$RUN_DIR/speed.lock" 2>/dev/null; then
+			printf '%s\n' "$$" > "$RUN_DIR/speed.token"
+			return 0
+		fi
+		# A killed worker can leave the mkdir token behind.  Reclaim it only
+		# when the recorded owner is definitely gone; never steal a live test.
+		owner=$(cat "$RUN_DIR/speed.token" 2>/dev/null || true)
+		case "$owner" in ''|*[!0-9]*) rmdir "$RUN_DIR/speed.lock" 2>/dev/null || true ;; *) kill -0 "$owner" 2>/dev/null || release_speed_token ;; esac
+		sleep 2
+	done
+	return 1
+}
+
+# ---------------------------------------------------------------------------
+# Pool scheduler: per-session dial + test pipeline with a global speed token,
+# auth throttling and busy-suspension. Sessions that already verified are left
+# untouched until they actually drop.
+# ---------------------------------------------------------------------------
+
+session_healthy() {
+	name=$1
+	ifn=$(session_get "$name" dev)
+	[ -n "$ifn" ] || return 1
+	[ -d "/sys/class/net/$ifn" ] || return 1
+	addr=$(ip -4 addr show "$ifn" 2>/dev/null | grep -c "inet ")
+	[ "$addr" -gt 0 ] && ifstatus "$name" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null | grep -q true
+}
+
+run_session_lifecycle() {
+	# Drives one session from "needs dial" through one parallel test cycle.
+	# The speed worker holds the global token; normal probing remains concurrent
+	# and a failed probe cancels the sibling download.
+	name=$1
+	normal_file="$RUN_DIR/normal.$name.result"
+	speed_file="$RUN_DIR/speed.$name.result"
+	: > "$normal_file"; : > "$speed_file"
+	normal_pid=; speed_pid=; nr=0; sr=0
+	if [ "$NORMAL_ENABLED" -eq 1 ]; then
+		(run_normal_test_session "$name" "$normal_file") &
+		normal_pid=$!
+	else
+		printf '%s\n' disabled > "$normal_file"
+	fi
+	if [ "$MBPS_ENABLED" -eq 1 ]; then
+		(
+			if wait_speed_token; then
+				trap 'cancel_speed_children "$name"; release_speed_token; exit 143' TERM INT HUP
+				run_speed_test_session "$name" "$speed_file" "$(session_get "$name" dev)"
+				rc=$?
+				trap - TERM INT HUP
+				release_speed_token
+				exit "$rc"
+			fi
+			exit 2
+		) &
+		speed_pid=$!
+	else
+		printf '%s\n' disabled > "$speed_file"
+	fi
+	[ -z "$normal_pid" ] || { wait "$normal_pid" 2>/dev/null; nr=$?; }
+	if [ "$nr" -ne 0 ] && [ -n "$speed_pid" ]; then
+		cancel_speed_children "$name"
+		kill -TERM "$speed_pid" 2>/dev/null || true
+	fi
+	[ -z "$speed_pid" ] || { wait "$speed_pid" 2>/dev/null; sr=$?; }
+	seg_normal=$(cat "$normal_file" 2>/dev/null || echo failure)
+	seg_mbps=$(cat "$speed_file" 2>/dev/null || echo failure)
+	seg_speed=$(cat "$RUN_DIR/speed.$name.value" 2>/dev/null || echo 0)
+	[ "$NORMAL_ENABLED" -eq 1 ] || seg_normal=disabled
+	[ "$MBPS_ENABLED" -eq 1 ] || seg_mbps=disabled
+	session_mark "$name" "normal=$seg_normal" "mbps200=$seg_mbps" "speed=$seg_speed"
+	write_status
+	[ "$nr" -eq 0 ] && [ "$sr" -eq 0 ] || return 1
+	[ "$seg_normal" = success ] || [ "$seg_normal" = disabled ] || return 1
+	[ "$seg_mbps" = success ] || [ "$seg_mbps" = disabled ] || return 1
+	return 0
+}
+
+run_pool_task() {
+	STOP_REQUESTED=0
+	DIAL_ATTEMPTS=0
+	REDIAL_COUNT=0
+	STATS_RECORDED=0
+	RUN_SUCCESS=0
+	RUN_FAILURE=0
+	validate_config || { log_msg "配置校验失败：$LAST_ERROR"; STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure; return 1; }
+	load_pool_config || { log_msg "连接池配置加载失败：$LAST_ERROR"; STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure; return 1; }
+	assign_session_accounts
+	log_msg "连接池任务开始：pool=$POOL_SIZE accounts=$([ "$ACCOUNT_MODE" = multi ] && echo multi || echo legacy) keepalive=$POOL_KEEPALIVE auth_interval=${AUTH_INTERVAL}s busy=${BUSY_KBYTES}KB normal=$NORMAL_ENABLED mbps200=$MBPS_ENABLED"
+	load_session_credentials "$WAN_INTERFACE" || { log_msg "主账号配置失败：$LAST_ERROR"; STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure; return 1; }
+	apply_pppoe_config || { log_msg "写入 PPPoE 配置失败：$LAST_ERROR"; STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure; return 1; }
+	sync_firewall_pool || { log_msg "防火墙配置失败：$LAST_ERROR"; STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure; return 1; }
+
+	# Initialize per-session state files (preserve counters across restarts).
+	i=1
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		session_init "$sname"
+		account_id=$(account_map_id "$sname"); [ -n "$account_id" ] || account_id=unassigned
+		account_label=$(account_map_label "$sname")
+		session_mark "$sname" "dev=pppoe-$sname" "account=$account_id" "account_label=$account_label" "terminal=$([ "$account_id" = unassigned ] && echo 1 || echo 0)"
+		i=$((i + 1))
+	done
+	configure_mwan3_pool
+
+	STATE=waiting_network
+	write_status
+	# Provision every missing session section, then bring them up one by one:
+	# dial -> test -> next, per the serial cold-start contract.
+	cold_start=1
+	[ -f "$RUN_DIR/pool.warmed" ] && cold_start=0
+	STATE=dialing
+	i=1
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$STOP_REQUESTED" -eq 0 ] || break
+		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		log_msg "池调度：i=$i wan=$WAN_INTERFACE session=$sname cold=$cold_start"
+		if ! load_session_credentials "$sname"; then
+			log_msg "[$sname] 账号配置失败：$LAST_ERROR"
+			session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "up=0" "terminal=1" "error=$LAST_ERROR"
+			write_status
+			i=$((i + 1)); continue
+		fi
+		already_up=0
+		session_healthy "$sname" && already_up=1
+		# Same reasoning as in pool_maintain_once: a verified+healthy session
+		# that was tested with mbps200=disabled must be re-tested now that the
+		# operator has turned on the speed mode; otherwise the speed column
+		# stays stuck at "disabled" forever.
+		cur_mbps=$(session_get "$sname" mbps200)
+		need_speed_retest=0
+		if [ "$MBPS_ENABLED" = 1 ] && [ "$cur_mbps" = disabled ]; then need_speed_retest=1; fi
+		if [ "$already_up" -eq 1 ] && [ "$(session_get "$sname" verified)" = 1 ] && [ "$need_speed_retest" = 0 ]; then
+			session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "up=1" "error="
+			log_msg "[$sname] 已验证且仍在线，保持静默"
+			write_status
+			i=$((i + 1))
+			continue
+		fi
+		if [ "$already_up" -eq 0 ]; then
+			session_mark "$sname" "state=dialing" "dial_state=dialing" "detection_state=waiting" "usable=0" "up=0"
+			write_status
+			if [ "$i" -eq 1 ]; then
+				if ! apply_pppoe_config; then
+					log_msg "主会话配置失败：$LAST_ERROR"
+					session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "up=0" "error=$LAST_ERROR"
+					i=$((i + 1)); continue
+				fi
+				# Push rewritten PPPoE settings into netifd when the config changed.
+				if [ "${NETWORK_CHANGED:-0}" -eq 1 ]; then
+					log_msg "主会话网络配置变更，先断开再拨"
+					ifdown_target
+					wait_seconds 2
+				fi
+			else
+				if ! ensure_mac_session "$sname"; then
+					log_msg "[$sname] 建立会话配置失败：$LAST_ERROR"
+					session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "up=0" "terminal=1" "error=$LAST_ERROR"
+					write_status
+					i=$((i + 1)); continue
+				fi
+			fi
+			auth_wait || { log_msg '认证节流期间被停止'; break; }
+			log_msg "[$sname] 发起拨号"
+			record_session_attempt "$sname" 0
+			ifup "$sname" >/dev/null 2>&1 || true
+			wait_for_up_name "$sname" 60 || log_msg "[$sname] 拨号超时"
+		fi
+		if session_healthy "$sname"; then
+			session_mark "$sname" "state=up" "dial_state=up" "detection_state=testing" "usable=1" "up=1"
+			log_msg "[$sname] 会话在线，等待 ${SETTLE_SECONDS}s 稳定后开始检测"
+			wait_seconds "$SETTLE_SECONDS" || break
+			if session_busy "$sname"; then
+				session_mark "$sname" "state=busy" "dial_state=up" "detection_state=queued" "usable=1" "up=1" "verified=0" "error=出口有大流量，等待空闲后检测"
+				log_msg "[$sname] 出口有大流量，保持当前连接并挂起检测"
+			elif run_session_lifecycle "$sname"; then
+				session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "verified=1" "up=1" "error="
+				record_session_result "$sname" success
+				log_msg "[$sname] 检测通过，计入成功连接"
+			else
+				session_mark "$sname" "state=failed" "dial_state=up" "detection_state=failed" "usable=1" "verified=0" "up=1" "error=检测未通过"
+				record_session_result "$sname" failure
+			fi
+		else
+			session_mark "$sname" "state=down" "dial_state=down" "detection_state=waiting" "usable=0" "up=0"
+			log_msg "[$sname] 拨号失败，等待下一轮补拨"
+		fi
+		write_status
+		i=$((i + 1))
+	done
+	printf '%s\n' 1 > "$RUN_DIR/pool.warmed"
+	success_count=$(pool_success_count)
+	connected_count=$(pool_connected_count)
+	log_msg "连接池首轮拨号完成（已连接 $connected_count/$POOL_SIZE，检测通过 $success_count/$POOL_SIZE）；未通过检测的在线会话仍可承载流量，后续将继续补拨/检测"
+	# Steady state: sweep the pool periodically. Repair-only; the speed token,
+	# auth throttle and busy-suspend rules all apply inside the sweep. A pool
+	# with no verified session is still retrying, not a completed failure, until
+	# every session is terminal or max_attempts is reached.
+	if [ "$success_count" -gt 0 ]; then
+		STATE=success
+		RUN_SUCCESS=1
+		write_status
+		write_last_run success
+	else
+		STATE=redialing
+		RUN_SUCCESS=0
+		[ -n "$LAST_ERROR" ] || LAST_ERROR="当前已连接 $connected_count/$POOL_SIZE 条，但检测通过数为 0，正在继续重拨/检测"
+		write_status
+	fi
+	if [ "$POOL_KEEPALIVE" -ne 1 ]; then
+		if [ "$success_count" -gt 0 ]; then
+			STATE=idle
+		else
+			STATE=failed
+			RUN_FAILURE=1
+			LAST_ERROR="当前已连接 $connected_count/$POOL_SIZE 条，但检测通过数为 0；连接仍可承载流量，维护已关闭"
+			write_last_run failure
+		fi
+		write_status
+		return 0
+	fi
+	sweep_wait=0
+	while [ "$STOP_REQUESTED" -eq 0 ]; do
+		if [ "$sweep_wait" -ge 30 ]; then
+			sweep_wait=0
+			# Reclaim stray speed blobs (killed curl children can leave them)
+			# so the status tmpfs never fills up between maintenance sweeps.
+			rm -f "$RUN_DIR"/speed.*.bin "$RUN_DIR"/speed.*.pids 2>/dev/null || true
+			pool_maintain_once
+			success_count=$(pool_success_count)
+			if [ "$success_count" -ge 1 ]; then
+				STATE=success
+				RUN_SUCCESS=1
+				RUN_FAILURE=0
+				if [ "${STATS_RECORDED:-0}" -eq 0 ]; then write_last_run success; fi
+				write_status
+			elif pool_all_exhausted; then
+				STATE=failed
+				RUN_SUCCESS=0
+				RUN_FAILURE=1
+				LAST_ERROR='所有 PPPoE 会话均达到最大拨号次数或不可重试'
+				write_last_run failure
+				write_status
+				return 1
+			else
+				STATE=redialing
+				RUN_SUCCESS=0
+				write_status
+			fi
+		fi
+		sweep_wait=$((sweep_wait + 1))
+		sleep 1
+	done
+	STATE=stopped
+	log_msg '连接池任务已停止'
+	write_last_run stopped
+	write_status
+	return 0
+}
+
+ensure_mac_session() {
+	name=$1
+	n=${name#wan}
+	case "$n" in ''|*[!0-9]*) LAST_ERROR="非法会话名：$name"; return 1 ;; esac
+	[ "$n" -ge 2 ] 2>/dev/null || { LAST_ERROR="非法会话名：$name"; return 1; }
+	if [ ! -d /sys/module/macvlan ]; then
+		modprobe macvlan 2>/dev/null || true
+		[ -d /sys/module/macvlan ] || {
+			LAST_ERROR='内核未提供 macvlan；连接池需要安装匹配的 kmod-macvlan'
+			return 1
+		}
+	fi
+	# Derive a locally administered, unicast MAC from the physical address.  The
+	# low byte is offset per session; reject overflow instead of wrapping onto a
+	# MAC already used by another session.
+	newmac=$(printf '%s' "$DEVICE_MAC" | awk -v inc=$((n - 1)) -F: '
+		function h(x,    i,c,v) { v=0; for(i=1;i<=length(x);i++){c=tolower(substr(x,i,1)); v=v*16+index("0123456789abcdef",c)-1} return v }
+		{ last=h($6); if (last+inc > 255) exit 1; printf "%s:%s:%s:%s:%s:%02x",$1,$2,$3,$4,$5,last+inc }
+	') || { LAST_ERROR="无法为 $name 生成独立 MAC"; return 1; }
+	# Linux IFNAMSIZ is 16 including the trailing NUL, so keep generated
+	# lower-device names comfortably below the 15-character limit.
+	dev_name="cr$name"
+	[ "${#dev_name}" -le 15 ] || { LAST_ERROR="生成的下层设备名过长：$dev_name"; return 1; }
+	dev_section="campus_${name}_device"
+	existing_type=$(uci -q get "network.$name" 2>/dev/null || true)
+	existing_managed=$(uci -q get "network.$name.campus_redial_managed" 2>/dev/null || true)
+	if [ -n "$existing_type" ] && { [ "$existing_type" != interface ] || [ "$existing_managed" != 1 ]; }; then
+		LAST_ERROR="network.$name 已存在且不属于本程序，拒绝覆盖"
+		return 1
+	fi
+	existing_device_type=$(uci -q get "network.$dev_section" 2>/dev/null || true)
+	existing_device_managed=$(uci -q get "network.$dev_section.campus_redial_managed" 2>/dev/null || true)
+	if [ -n "$existing_device_type" ] && [ "$existing_device_managed" != 1 ]; then
+		existing_device_name=$(uci -q get "network.$dev_section.name" 2>/dev/null || true)
+		# Upgrade compatibility: older releases marked the interface section but
+		# not its paired campus_*_device section.
+		if [ "$existing_managed" != 1 ] || [ "$existing_device_type" != device ] || [ "$existing_device_name" != "$dev_name" ]; then
+			LAST_ERROR="network.$dev_section 已存在且不属于本程序，拒绝覆盖"
+			return 1
+		fi
+	fi
+	[ -n "$existing_type" ] || uci set "network.$name=interface"
+	if [ "$name" != "$WAN_INTERFACE" ] && [ "$POOL_SIZE" -gt 1 ]; then
+		# OpenWrt's netifd can claim a pre-declared macvlan device.  It is the
+		# only safe way to put a distinct source MAC on PPPoE discovery without
+		# changing the physical device or injecting VLAN tags.
+		uci set "network.$dev_section=device"
+		uci set "network.$dev_section.name=$dev_name"
+		uci set "network.$dev_section.type=macvlan"
+		uci set "network.$dev_section.ifname=$DEVICE"
+		uci set "network.$dev_section.mode=bridge"
+		uci set "network.$dev_section.macaddr=$newmac"
+		uci set "network.$dev_section.campus_redial_managed=1"
+		uci set "network.$name.device=$dev_name"
+	else
+		uci set "network.$name.device=$DEVICE"
+	fi
+	uci set "network.$name.proto=pppoe"
+	uci set "network.$name.username=$PPPOE_USERNAME"
+	uci set "network.$name.password=$PPPOE_PASSWORD"
+	uci set "network.$name.pppname=pppoe-$name"
+	uci set "network.$name.macaddr=$newmac"
+	# Secondary sessions do not create IPv6 aliases on the shared device; this
+	# avoids netifd tearing down a sibling PPP instance during setup.
+	uci set "network.$name.ipv6=0"
+	uci set "network.$name.delegate=0"
+	uci set "network.$name.auto=0"
+	uci set "network.$name.campus_redial_managed=1"
+	uci commit network || { LAST_ERROR='无法提交多会话 network 配置'; return 1; }
+	session_mark "$name" "dev=pppoe-$name" "mac=$newmac"
+	return 0
+}
+
+cleanup_mwan_interface() {
+	cleanup_name=$1
+	uci -q delete "mwan3.cr_${cleanup_name}_member" || true
+	# Remove the actual mwan3 interface only when this package created it.
+	# A user's pre-existing `wan` tracking configuration remains untouched.
+	if [ "$(uci -q get "mwan3.$cleanup_name.campus_redial_managed" 2>/dev/null || true)" = 1 ]; then
+		uci -q delete "mwan3.$cleanup_name" || true
+	fi
+	# Clean section names emitted by pre-1.0 test builds. Those names never
+	# mapped to real netifd interfaces and are always owned by this package.
+	uci -q delete "mwan3.campus_redial_$cleanup_name" || true
+	# Clean long-named sections from the 25.12-era builds; mwan3 2.10.x on
+	# OpenWrt 21.02 drops iptables chains above 15 characters, so releases on
+	# that branch own only the short cr_* names below.
+	uci -q delete "mwan3.campus_redial_${cleanup_name}_member" || true
+	uci -q delete mwan3.campus_redial_balanced 2>/dev/null || true
+	uci -q delete mwan3.campus_redial_default_ipv4 || true
+}
+
+disable_unused_pool_sessions() {
+	i=$((POOL_SIZE + 1))
+	while [ "$i" -le "$MAX_POOL_SESSIONS" ]; do
+		name="wan$i"
+		managed=$(uci -q get "network.$name.campus_redial_managed" 2>/dev/null || true)
+		if [ "$managed" = 1 ]; then
+			ifdown "$name" >/dev/null 2>&1 || true
+			uci -q delete "network.$name"
+			uci -q delete "network.campus_${name}_device"
+			rm -f "$RUN_DIR/session.$name" "$RUN_DIR/normal.$name.result" "$RUN_DIR/speed.$name.result" "$RUN_DIR/speed.$name.value"
+		fi
+		i=$((i + 1))
+	done
+	uci commit network >/dev/null 2>&1 || true
+	# Remove only mwan3 sections previously owned by this package when the
+	# configured pool shrinks.  User-created mwan3 sections are untouched.
+	if [ -f /etc/config/mwan3 ]; then
+		cleanup_wan=$(uci_get wan_interface); [ -n "$cleanup_wan" ] || cleanup_wan=wan
+		case "$cleanup_wan" in *[!a-zA-Z0-9_-]*) cleanup_wan=wan ;; esac
+		if [ "$POOL_SIZE" -le 1 ]; then
+			cleanup_mwan_interface "$cleanup_wan"
+		fi
+		i=$((POOL_SIZE + 1))
+	while [ "$i" -le "$MAX_POOL_SESSIONS" ]; do
+			cleanup_mwan_interface "wan$i"
+			i=$((i + 1))
+		done
+		if [ "$POOL_SIZE" -le 1 ]; then
+			uci -q delete mwan3.cr_balanced || true
+			uci -q delete mwan3.cr_default_ipv4 || true
+		fi
+		uci commit mwan3 >/dev/null 2>&1 || true
+	fi
+}
+
+configure_mwan3_pool() {
+	# Keep mwan3 integration additive and idempotent. We reuse a valid user
+	# interface section and own only newly created interfaces plus the
+	# campus_redial_* members/policy/rule. Never reload mwan3 here; netifd changes
+	# are allowed to be observed by an already-running mwan3 instance without
+	# moving existing flows during a speed test.
+	[ "$POOL_SIZE" -gt 1 ] || return 0
+	[ -f /etc/config/mwan3 ] || return 0
+	command -v uci >/dev/null 2>&1 || return 0
+	i=1; members=
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$i" -eq 1 ] && s=$WAN_INTERFACE || s="wan$i"
+		isec="$s"
+		msec="cr_${s}_member"
+		isec_type=$(uci -q get "mwan3.$isec" 2>/dev/null || true)
+		if [ -z "$isec_type" ]; then
+			uci set "mwan3.$isec=interface"
+			uci set "mwan3.$isec.campus_redial_managed=1"
+			uci set "mwan3.$isec.enabled=1"
+			uci set "mwan3.$isec.family=ipv4"
+			uci set "mwan3.$isec.reliability=1"
+			# mwan3 2.10.x (OpenWrt 21.02) requires explicit track IPs; domestic
+			# resolvers stay reachable from campus egress networks.
+			for tip in 223.5.5.5 114.114.114.114 119.29.29.29 180.76.76.76; do
+				uci add_list "mwan3.$isec.track_ip=$tip"
+			done
+		elif [ "$isec_type" != interface ]; then
+			log_msg "mwan3.$isec 已存在但不是 interface，跳过该成员"
+			i=$((i + 1))
+			continue
+		fi
+		uci set "mwan3.$msec=member"
+		uci set "mwan3.$msec.interface=$s"
+		uci set "mwan3.$msec.metric=1"
+		uci set "mwan3.$msec.weight=1"
+		members="$members $msec"
+		i=$((i + 1))
+	done
+	uci set mwan3.cr_balanced=policy
+	uci -q delete mwan3.cr_balanced.use_member 2>/dev/null || true
+	for m in $members; do uci add_list mwan3.cr_balanced.use_member="$m"; done
+	uci set mwan3.cr_default_ipv4=rule
+	uci set mwan3.cr_default_ipv4.dest_ip='0.0.0.0/0'
+	uci set mwan3.cr_default_ipv4.proto='all'
+	uci set mwan3.cr_default_ipv4.family='ipv4'
+	uci set mwan3.cr_default_ipv4.use_policy='cr_balanced'
+	# Keep this catch-all ahead of pre-existing default rules so pool traffic is
+	# not consumed by an older policy first. Relative order of user sections is
+	# preserved when this owned rule is removed.
+	uci reorder mwan3.cr_default_ipv4=0 2>/dev/null || true
+	uci commit mwan3 || log_msg 'mwan3 配置提交失败（连接池仍可单独运行）'
+}
+
+wait_for_up_name() {
+	name=$1; limit=${2:-60}
+	while [ "$limit" -gt 0 ]; do
+		[ "$STOP_REQUESTED" -eq 0 ] || return 1
+		ifstatus "$name" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null | grep -q true && {
+			# netifd only installs a default route for the primary PPPoE session,
+			# so the table mwan3 owns for every extra session would stay without
+			# one and mwan3 would flag it error (16) -> dropped from the policy.
+			if [ -x /usr/sbin/campus-redial-mwan3route ]; then
+				/usr/sbin/campus-redial-mwan3route "$name" >/dev/null 2>&1 || true
+			fi
+			return 0
+		}
+		sleep 1
+		limit=$((limit - 1))
+	done
+	return 1
+}
+
+pool_success_count() {
+	# Count sessions whose latest test cycle passed (verified=1).
+	i=1; n=0
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$i" -eq 1 ] && s=$WAN_INTERFACE || s="wan$i"
+		[ "$(session_get "$s" verified)" = 1 ] && n=$((n + 1))
+		i=$((i + 1))
+	done
+	printf '%s' "$n"
+}
+
+pool_connected_count() {
+	# A PPPoE interface with an address is usable for forwarding even before its
+	# optional health/speed checks pass. Keep this separate from verified count.
+	i=1; n=0
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$i" -eq 1 ] && s=$WAN_INTERFACE || s="wan$i"
+		if [ "$(session_get "$s" usable)" = 1 ] || [ "$(session_get "$s" up)" = 1 ]; then
+			n=$((n + 1))
+		fi
+		i=$((i + 1))
+	done
+	printf '%s' "$n"
+}
+
+pool_all_exhausted() {
+	# A terminal configuration error or a session that reached max_attempts is
+	# no longer retryable.  The pool can stop only when every requested session
+	# is in one of those terminal states; successful peers may keep running.
+	i=1
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		terminal=$(session_get "$sname" terminal)
+		dials=$(session_get "$sname" dial_attempts)
+		case "$dials" in ''|*[!0-9]*) dials=0 ;; esac
+		if [ "$terminal" != 1 ] && [ "$dials" -lt "$MAX_ATTEMPTS" ] 2>/dev/null; then
+			return 1
+		fi
+		i=$((i + 1))
+	done
+	return 0
+}
+
+pool_maintain_once() {
+	# One maintenance sweep over the whole pool. Repair-only: sessions that
+	# verified stay untouched; a dropped session gets dialed (throttled) and
+	# re-tested once, with the global speed token and busy-suspend honored.
+	i=1
+	while [ "$i" -le "$POOL_SIZE" ]; do
+		[ "$STOP_REQUESTED" -eq 0 ] && [ "$RUNNING" -eq 1 ] || return 0
+		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		session_init "$sname"
+		load_session_credentials "$sname" || {
+			session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "up=0" "terminal=1" "error=$LAST_ERROR"
+			write_status
+			i=$((i + 1)); continue
+		}
+		verified=$(session_get "$sname" verified)
+		state=$(session_get "$sname" state)
+		terminal=$(session_get "$sname" terminal)
+		if [ "$terminal" = 1 ]; then
+			i=$((i + 1)); continue
+		fi
+		# Verified+healthy sessions are usually skipped, BUT a session that
+		# verified with mbps200=disabled was tested under a prior config where
+		# the speed mode was off. If mbps200 is now on, force a fresh test so
+		# the operator actually sees a speed number instead of stale "disabled".
+		cur_mbps=$(session_get "$sname" mbps200)
+		need_speed_retest=0
+		if [ "$MBPS_ENABLED" = 1 ] && [ "$cur_mbps" = disabled ]; then need_speed_retest=1; fi
+		if [ "$verified" = 1 ] && session_healthy "$sname" && [ "$need_speed_retest" = 0 ]; then
+			[ "$state" = success ] || session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "up=1"
+			i=$((i + 1)); continue
+		fi
+		# An online session whose test was deferred for traffic must not be
+		# redialed. Keep it connected until traffic falls below the threshold.
+		if [ "$state" = busy ] && session_healthy "$sname"; then
+			if session_busy "$sname"; then
+				log_msg "[$sname] 出口仍有大流量，继续挂起检测"
+				write_status
+				i=$((i + 1)); continue
+			fi
+			session_mark "$sname" "state=up" "dial_state=up" "detection_state=testing" "usable=1" "up=1" "error="
+			if run_session_lifecycle "$sname"; then
+				session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "verified=1" "up=1" "terminal=0" "error="
+				record_session_result "$sname" success
+			else
+				session_mark "$sname" "state=failed" "dial_state=up" "detection_state=failed" "usable=1" "verified=0" "up=1" "terminal=0" "error=检测未通过"
+				record_session_result "$sname" failure
+			fi
+			write_status
+			i=$((i + 1)); continue
+		fi
+		# Repair policy: a failed session keeps its PPPoE link and waits for its
+		# next scheduling turn. Only ONE session per sweep — the one whose turn
+		# it is — performs the full ifdown/ifup redial; all other sessions stay
+		# connected, so at any moment at most one link is briefly down and
+		# POOL_SIZE-1 sessions remain forwarding traffic.
+		#
+		# Decision per sweep for the rotated session:
+		#   link down            -> dial (its own turn, no other session touched)
+		#   link up + test fail  -> one short redial turn right now (single link
+		#                           down for PAUSE+dial), then test the fresh exit
+		# Sessions stay equivalent: the sweep walks every pool session in order,
+		# regardless of which account owns it.
+		dials=$(session_get "$sname" dial_attempts)
+		case "$dials" in ''|*[!0-9]*) dials=0 ;; esac
+		if [ "$dials" -ge "$MAX_ATTEMPTS" ] 2>/dev/null; then
+			session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "verified=0" "terminal=1" "error=已达到最大拨号次数"
+			log_msg "[$sname] 已达到最大拨号次数，停止补拨"
+			write_status
+			i=$((i + 1)); continue
+		fi
+		log_msg "[$sname] 轮到本会话重拨（state=$state verified=$verified）"
+		load_session_credentials "$sname" || {
+		session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "terminal=1" "error=$LAST_ERROR"
+			write_status
+			i=$((i + 1)); continue
+		}
+		auth_wait || return 1
+		ifdown "$sname" >/dev/null 2>&1 || true
+		wait_seconds "$PAUSE_SECONDS" || return 0
+		record_session_attempt "$sname" 1
+		ifup "$sname" >/dev/null 2>&1 || true
+		session_mark "$sname" "state=dialing" "dial_state=dialing" "detection_state=waiting" "usable=0" "up=0" "verified=0" "terminal=0"
+		write_status
+		wait_for_up_name "$sname" 60 || { session_mark "$sname" "state=down" "dial_state=down" "detection_state=waiting" "usable=0" "up=0"; write_status; i=$((i + 1)); continue; }
+		session_mark "$sname" "state=up" "dial_state=up" "detection_state=testing" "usable=1" "up=1"
+		# Let the fresh PPPoE session settle before testing (BRAS/DNS need a
+		# moment right after authentication).
+		wait_seconds "$SETTLE_SECONDS" || return 0
+		# busy-suspend: defer testing while the session carries traffic
+		if session_busy "$sname"; then
+			session_mark "$sname" "state=busy" "dial_state=up" "detection_state=queued" "usable=1" "up=1" "verified=0" "error=出口有大流量，等待空闲后检测"
+			log_msg "[$sname] 出口有大流量，保持当前连接并挂起检测"
+			write_status
+			i=$((i + 1)); continue
+		fi
+		if run_session_lifecycle "$sname"; then
+			session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "verified=1" "up=1" "terminal=0" "error="
+			record_session_result "$sname" success
+			log_msg "[$sname] 检测通过（成功连接 $(pool_success_count)/$POOL_SIZE）"
+		else
+			session_mark "$sname" "state=failed" "dial_state=up" "detection_state=failed" "usable=1" "verified=0" "up=1" "terminal=0" "error=检测未通过"
+			record_session_result "$sname" failure
+			log_msg "[$sname] 补拨后检测未通过，继续池维护"
+		fi
+		write_status
+		i=$((i + 1))
+	done
+	return 0
+}
+
+run_enabled_tests() {
+	# Single-session compatibility path used by `test` and `redial_once`.
+	# Start both checks together; a failed normal probe cancels the sibling
+	# speed worker so a doomed task does not hold the WAN for its full window.
+	: > "$RUN_DIR/normal.result"
+	: > "$RUN_DIR/speed.result"
+	# The compatibility path can be invoked before the pool worker has
+	# populated the session state.  Seed the primary PPPoE device so the
+	# per-session binding helper never probes through an empty device name.
+	session_init "$WAN_INTERFACE"
+	session_mark "$WAN_INTERFACE" "dev=pppoe-$WAN_INTERFACE"
+	normal_pid=; speed_pid=; normal_rc=0; speed_rc=0
+	if [ "$NORMAL_ENABLED" -eq 1 ]; then
+		(run_normal_test_session "$WAN_INTERFACE" "$RUN_DIR/normal.result") &
+		normal_pid=$!
+	else
+		printf '%s\n' disabled > "$RUN_DIR/normal.result"
+	fi
+	if [ "$MBPS_ENABLED" -eq 1 ]; then
+		(
+			if wait_speed_token; then
+				trap 'cancel_speed_children "$WAN_INTERFACE"; release_speed_token; exit 143' TERM INT HUP
+				run_speed_test_session "$WAN_INTERFACE" "$RUN_DIR/speed.result" "$(session_get "$WAN_INTERFACE" dev)"
+				rc=$?
+				trap - TERM INT HUP
+				release_speed_token
+				exit "$rc"
+			fi
+			exit 2
+		) &
+		speed_pid=$!
+	else
+		printf '%s\n' disabled > "$RUN_DIR/speed.result"
+	fi
+	if [ -n "$normal_pid" ]; then
+		wait "$normal_pid" 2>/dev/null; normal_rc=$?
+	fi
+	if [ "$normal_rc" -ne 0 ] && [ -n "$speed_pid" ]; then
+		cancel_speed_children "$WAN_INTERFACE"
+		kill -TERM "$speed_pid" 2>/dev/null || true
+	fi
+	if [ -n "$speed_pid" ]; then
+		wait "$speed_pid" 2>/dev/null; speed_rc=$?
+	fi
+	NORMAL_RESULT=$(cat "$RUN_DIR/normal.result" 2>/dev/null || echo failure)
+	MBPS_RESULT=$(cat "$RUN_DIR/speed.result" 2>/dev/null || echo failure)
+	[ "$NORMAL_ENABLED" -eq 1 ] || NORMAL_RESULT=disabled
+	[ "$MBPS_ENABLED" -eq 1 ] || MBPS_RESULT=disabled
+	SPEED_VALUE=$(cat "$RUN_DIR/speed.$WAN_INTERFACE.value" 2>/dev/null || cat "$RUN_DIR/speed.value" 2>/dev/null || echo 0)
+	compat_ok=1
+	[ "$normal_rc" -eq 0 ] && [ "$speed_rc" -eq 0 ] || compat_ok=0
+	[ "$NORMAL_RESULT" = success ] || [ "$NORMAL_RESULT" = disabled ] || compat_ok=0
+	[ "$MBPS_RESULT" = success ] || [ "$MBPS_RESULT" = disabled ] || compat_ok=0
+	session_init "$WAN_INTERFACE"
+	if [ "$compat_ok" -eq 1 ]; then
+		LAST_ERROR=
+		session_mark "$WAN_INTERFACE" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "up=1" "normal=$NORMAL_RESULT" "mbps200=$MBPS_RESULT" "speed=$SPEED_VALUE" "verified=1" "error="
+		record_session_result "$WAN_INTERFACE" success
+	else
+		LAST_ERROR='过点或高宽检测未通过'
+		session_mark "$WAN_INTERFACE" "state=failed" "dial_state=up" "detection_state=failed" "usable=1" "up=1" "normal=$NORMAL_RESULT" "mbps200=$MBPS_RESULT" "speed=$SPEED_VALUE" "verified=0" "error=$LAST_ERROR"
+		record_session_result "$WAN_INTERFACE" failure
+	fi
+	write_status
+	[ "$compat_ok" -eq 1 ]
+}
+
+handle_command() {
+	case "${1:-}" in
+		start)
+			[ "$RUNNING" -eq 0 ] || return 0
+			RUNNING=1
+			DIAL_ATTEMPTS=0; REDIAL_COUNT=0; STATS_RECORDED=0
+			STATE=starting
+			if ! load_pool_config; then
+				STATE=failed; RUN_FAILURE=1; LAST_ERROR=${LAST_ERROR:-'连接池配置加载失败'}
+				write_status; write_last_run failure; RUNNING=0; return 1
+			fi
+	disable_unused_pool_sessions
+			write_status
+			(run_pool_task; exit 0) &
+			WORKER=$!
+			;;
+stop)
+			STOP_REQUESTED=1
+			if [ -n "$WORKER" ]; then
+				kill "$WORKER" 2>/dev/null || true
+				# The worker owns any probe/download children.  Kill the process
+				# group when the shell supports it, then clean only our known
+				# command names as a BusyBox fallback.
+				kill -TERM -- "-$WORKER" 2>/dev/null || true
+			fi
+			pkill -TERM -f 'uclient-fetch.*test\.xidian\.edu\.cn' 2>/dev/null || true
+			pkill -TERM -f 'uclient-fetch.*abvolcapi\.douyucdn\.cn|uclient-fetch.*apiv2\.douyucdn\.cn' 2>/dev/null || true
+			release_speed_token
+			RUNNING=0
+			STATE=stopped
+			write_status
+			;;
+		test)
+			[ "$RUNNING" -eq 0 ] || return 0
+			RUNNING=1
+			DIAL_ATTEMPTS=0; REDIAL_COUNT=0; STATS_RECORDED=0
+			STATE=testing
+			log_msg '手动触发当前出口测试（主会话，不拨号）'
+			write_status
+			(if ! validate_config; then
+				log_msg "配置校验失败：$LAST_ERROR"
+				STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure
+			elif ! interface_up; then
+				log_msg '当前出口测试：PPPoE 未连接'
+				STATE=idle; LAST_ERROR='PPPoE 未连接，无法测试当前出口'
+				write_status; write_last_run failure
+			elif run_enabled_tests; then
+				log_msg "当前出口测试通过：normal=$NORMAL_RESULT mbps200=$MBPS_RESULT speed=$SPEED_VALUE"
+				STATE=idle; RUN_SUCCESS=1; RUN_FAILURE=0; write_status; write_last_run success
+			else
+				log_msg "当前出口测试未通过：$LAST_ERROR"
+				STATE=idle; RUN_FAILURE=1; write_status; write_last_run failure
+			fi
+			exit 0) &
+			WORKER=$!
+			;;
+		redial_once)
+			[ "$RUNNING" -eq 0 ] || return 0
+			RUNNING=1
+			DIAL_ATTEMPTS=0; REDIAL_COUNT=0; STATS_RECORDED=0
+			STATE=redialing
+			write_status
+			(if validate_config; then
+				if ! load_pool_config; then
+					STATE=failed; RUN_FAILURE=1; LAST_ERROR=${LAST_ERROR:-'连接池配置加载失败'}
+					write_status; write_last_run failure
+					exit 0
+				fi
+				load_session_credentials "$WAN_INTERFACE" || {
+					STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure
+					exit 0
+				}
+				if ! apply_pppoe_config; then
+					STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure
+					exit 0
+				fi
+				auth_wait || exit 0
+				session_init "$WAN_INTERFACE"
+				session_mark "$WAN_INTERFACE" "dev=pppoe-$WAN_INTERFACE"
+				ifdown_target; wait_seconds 2; record_session_attempt "$WAN_INTERFACE" 1; ifup_target || true
+				if wait_for_up 60 && run_enabled_tests; then
+					STATE=success; RUN_SUCCESS=1; RUN_FAILURE=0; write_status; write_last_run success
+				else
+					[ -n "$LAST_ERROR" ] || LAST_ERROR='单次重拨拨号超时或检测未通过'
+					STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure
+				fi
+			else
+				STATE=failed; RUN_FAILURE=1; write_status; write_last_run failure
+			fi
+			exit 0) &
+			WORKER=$!
+			;;
+		clear_stats)
+			TOTAL_DIAL=0; TOTAL_REDIAL=0; TOTAL_SUCCESS=0; TOTAL_FAILURE=0
+			TOTAL_NORMAL=0; TOTAL_MBPS=0; TOTAL_SPEED=0
+			write_stats
+			;;
+	esac
+}
+
+load_stats
+if ! load_pool_config; then
+	STATE=failed
+	LAST_ERROR=${LAST_ERROR:-'连接池配置加载失败'}
+fi
+write_status
+# restore auth timestamp across daemon restarts so restarts never dial faster
+[ -r "$RUN_DIR/last_auth" ] && LAST_AUTH_TS=$(cat "$RUN_DIR/last_auth" 2>/dev/null || echo 0)
+
+if [ "$(uci_get enabled)" = 1 ]; then
+	# Trigger one automatic pool task on daemon startup.
+	handle_command start
+fi
+
+while :; do
+	if [ -s "$CONTROL_FILE" ]; then
+		command_name=$(head -n 1 "$CONTROL_FILE" 2>/dev/null || true)
+		: > "$CONTROL_FILE"
+		handle_command "$command_name"
+	fi
+	if [ "$RUNNING" -eq 1 ] && [ -n "$WORKER" ] && ! kill -0 "$WORKER" 2>/dev/null; then
+		wait "$WORKER" 2>/dev/null || true
+		RUNNING=0
+		WORKER=
+		if [ -r "$STATUS_FILE" ]; then
+			tmp=$(atomic_tmp "$STATUS_FILE.done")
+			sed 's/"running":true/"running":false/' "$STATUS_FILE" > "$tmp" && mv -f "$tmp" "$STATUS_FILE"
+		fi
+	fi
+	sleep 1
+done

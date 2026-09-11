@@ -1,0 +1,3 @@
+streaming kernel log to D:/CampusNetworkRedial/kmod-build/capture-macvlan-3.log
+=== trigger: sh /tmp/cr-iface.sh > /tmp/cr-iface.out 2>&1 ===
+trigger rc=0

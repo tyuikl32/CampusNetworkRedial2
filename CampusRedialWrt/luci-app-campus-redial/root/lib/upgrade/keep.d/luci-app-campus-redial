@@ -1,0 +1,6 @@
+/etc/config/campus-redial
+/etc/campus-redial/stats.json
+/etc/campus-redial/last-run.json
+/etc/campus-redial/main-network-state
+/etc/campus-redial/firewall-managed-networks
+/etc/config/network.campus-redial.bak

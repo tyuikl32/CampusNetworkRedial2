@@ -1,0 +1,3 @@
+streaming kernel log to D:/CampusNetworkRedial/kmod-build/capture-persist.log
+=== trigger: sh /tmp/cr-persist.sh > /tmp/cr-persist.out 2>&1 ===
+trigger rc=0

@@ -17,11 +17,11 @@ echo.
 if defined DIALNAME (
     echo Detected dial-up name: %DIALNAME%
     echo.
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Redial-UntilCampusReady.ps1" -DialName "%DIALNAME%"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Redial-UntilCampusReady.ps1" -DialName "%DIALNAME%" %*
 ) else (
     echo No single dial-up entry detected; the script will auto-detect the name.
     echo.
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Redial-UntilCampusReady.ps1"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Redial-UntilCampusReady.ps1" %*
 )
 
 set "CODE=%ERRORLEVEL%"

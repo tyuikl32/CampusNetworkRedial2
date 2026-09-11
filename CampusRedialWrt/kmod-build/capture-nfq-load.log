@@ -1,0 +1,508 @@
+6,0,0,-;Booting Linux on physical CPU 0x0
+5,1,0,-;Linux version 5.4.164 (builder@DESKTOP-H0F9EJJ) (gcc version 8.4.0 (OpenWrt GCC 8.4.0 r16847-f8282da11e)) #0 SMP PREEMPT Mon Apr 17 13:15:36 2023
+6,2,0,-;CPU: ARMv7 Processor [51af8014] revision 4 (ARMv7), cr=10c0383d
+6,3,0,-;CPU: div instructions available: patching division code
+6,4,0,-;CPU: PIPT / VIPT nonaliasing data cache, VIPT aliasing instruction cache
+6,5,0,-;OF: fdt: Machine model: Redmi AX3000
+6,6,0,-;Memory policy: Data cache writealloc
+7,7,0,-;On node 0 totalpages: 49152
+7,8,0,-;  Normal zone: 576 pages used for memmap
+7,9,0,-;  Normal zone: 0 pages reserved
+7,10,0,-;  Normal zone: 49152 pages, LIFO batch:15
+6,11,0,-;psci: probing for conduit method from DT.
+6,12,0,-;psci: PSCIv1.0 detected in firmware.
+6,13,0,-;psci: Using standard PSCI v0.2 function IDs
+6,14,0,-;psci: MIGRATE_INFO_TYPE not supported.
+6,15,0,-;psci: SMC Calling Convention v1.0
+6,16,0,-;psci: OSI mode supported.
+6,17,0,-;percpu: Embedded 15 pages/cpu s32140 r8192 d21108 u61440
+7,18,0,-;pcpu-alloc: s32140 r8192 d21108 u61440 alloc=15*4096
+7,19,0,-;pcpu-alloc: [0] 0 [0] 1 
+6,20,0,-;Built 1 zonelists, mobility grouping on.  Total pages: 48576
+5,21,0,-;Kernel command line: console=ttyMSM0,115200n8 ubi.mtd=rootfs root=mtd:ubi_rootfs rootfstype=squashfs rootwait root=/dev/ubiblock0_1 coherent_pool=2M
+6,22,0,-;Dentry cache hash table entries: 32768 (order: 5, 131072 bytes, linear)
+6,23,0,-;Inode-cache hash table entries: 16384 (order: 4, 65536 bytes, linear)
+6,24,0,-;mem auto-init: stack:off, heap alloc:off, heap free:off
+6,25,0,-;Memory: 183424K/196608K available (6493K kernel code, 245K rwdata, 1976K rodata, 1024K init, 348K bss, 13184K reserved, 0K cma-reserved, 0K highmem)
+6,26,0,-;SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+6,27,0,-;rcu: Preemptible hierarchical RCU implementation.
+6,28,0,-;\x09Tasks RCU enabled.
+6,29,0,-;rcu: RCU calculated value of scheduler-enlistment delay is 10 jiffies.
+6,30,0,-;NR_IRQS: 16, nr_irqs: 16, preallocated irqs: 16
+6,31,0,-;GICv2m: range[mem 0x0b00a000-0x0b00affc], SPI[448:479]
+6,32,0,-;GICv2m: range[mem 0x0b00b000-0x0b00bffc], SPI[480:511]
+5,33,0,-;random: get_random_bytes called from start_kernel+0x344/0x4f4 with crng_init=0
+6,34,0,-;arch_timer: cp15 and mmio timer(s) running at 24.00MHz (virt/virt).
+6,35,0,-;clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+6,36,6,-;sched_clock: 56 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+6,37,18,-;Switching to timer-based delay loop, resolution 41ns
+6,38,356,-;Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=240000)
+6,39,374,-;pid_max: default: 32768 minimum: 301
+6,40,525,-;Mount-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+6,41,541,-;Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+6,42,1442,-;CPU: Testing write buffer coherency: ok
+6,43,1884,-;CPU0: thread -1, cpu 0, socket 0, mpidr 80000000
+6,44,2706,-;Setting up static identity map for 0x41300000 - 0x41300060
+6,45,2880,-;rcu: Hierarchical SRCU implementation.
+6,46,3357,-;smp: Bringing up secondary CPUs ...
+6,47,4318,-;CPU1: thread -1, cpu 1, socket 0, mpidr 80000001
+6,48,4501,-;smp: Brought up 1 node, 2 CPUs
+6,49,4521,-;SMP: Total of 2 processors activated (96.00 BogoMIPS).
+6,50,4528,-;CPU: All CPU(s) started in SVC mode.
+6,51,12677,-;VFP support v0.3: implementor 51 architecture 3 part 40 variant 3 rev 4
+6,52,13091,-;clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+6,53,13119,-;futex hash table entries: 512 (order: 3, 32768 bytes, linear)
+6,54,13280,-;pinctrl core: initialized pinctrl subsystem
+6,55,14387,-;NET: Registered protocol family 16
+6,56,15859,-;DMA: preallocated 2048 KiB pool for atomic coherent allocations
+6,57,17042,-;cpuidle: using governor ladder
+6,58,17097,-;cpuidle: using governor menu
+6,59,17322,-;NET: Registered protocol family 42
+6,60,17673,-;hw-breakpoint: found 5 (+1 reserved) breakpoint and 4 watchpoint registers.
+6,61,17685,-;hw-breakpoint: maximum watchpoint size is 8 bytes.
+6,62,60347,-;qcom,gcc-ipq5018 1800000.gcc: Registered ipq5018 GCC clocks provider
+ SUBSYSTEM=platform
+ DEVICE=+platform:1800000.gcc
+6,63,74884,-;msm_sps_probe: sps:sps is ready
+6,64,103311,-;pps_core: LinuxPPS API ver. 1 registered
+6,65,103324,-;pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+6,66,103349,-;PTP clock support registered
+6,67,104171,-;Advanced Linux Sound Architecture Driver Initialized.
+4,68,104240,-;workqueue: max_active 576 requested for napi_workq is out of range, clamping between 1 and 512
+6,69,105442,-;clocksource: Switched to clocksource arch_sys_counter
+6,70,106312,-;thermal_sys: Registered thermal governor 'step_wise'
+6,71,106318,-;thermal_sys: Registered thermal governor 'user_space'
+6,72,107340,-;NET: Registered protocol family 2
+6,73,107481,-;IP idents hash table entries: 4096 (order: 3, 32768 bytes, linear)
+6,74,108054,-;tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 6144 bytes, linear)
+6,75,108097,-;TCP established hash table entries: 2048 (order: 1, 8192 bytes, linear)
+6,76,108130,-;TCP bind hash table entries: 2048 (order: 2, 16384 bytes, linear)
+6,77,108171,-;TCP: Hash tables configured (established 2048 bind 2048)
+6,78,108284,-;UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+6,79,108312,-;UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+6,80,108555,-;NET: Registered protocol family 1
+6,81,108601,-;PCI: CLS 0 bytes, default 64
+6,82,110059,-;workingset: timestamp_bits=14 max_order=16 bucket_order=2
+6,83,115750,-;squashfs: version 4.0 (2009/01/31) Phillip Lougher
+6,84,115762,-;jffs2: version 2.2 (NAND) (SUMMARY) (LZMA) (RTIME) (CMODE_PRIORITY) (c) 2001-2006 Red Hat, Inc.
+5,85,152927,-;Key type asymmetric registered
+5,86,152950,-;Asymmetric key parser 'x509' registered
+3,87,154882,-;bam-dma-engine 704000.dma: num-channels unspecified in dt
+ SUBSYSTEM=platform
+ DEVICE=+platform:704000.dma
+3,88,154900,-;bam-dma-engine 704000.dma: num-ees unspecified in dt
+ SUBSYSTEM=platform
+ DEVICE=+platform:704000.dma
+3,89,155861,-;bam-dma-engine 7884000.dma: qcom,controlled-remotely unspecified
+ SUBSYSTEM=platform
+ DEVICE=+platform:7884000.dma
+3,90,156796,-;bam-dma-engine 7984000.dma: qcom,controlled-remotely unspecified
+ SUBSYSTEM=platform
+ DEVICE=+platform:7984000.dma
+6,91,158688,-;CPU: IPQ5000, SoC Version: 1.1
+4,92,159403,-;TZ Log : Will warn on Access Violation, as paniconaccessviolation is not set
+6,93,160576,-;msm_serial 78af000.serial: msm_serial: detected port #0
+ SUBSYSTEM=platform
+ DEVICE=+platform:78af000.serial
+6,94,160622,-;msm_serial 78af000.serial: uartclk = 1843199
+ SUBSYSTEM=platform
+ DEVICE=+platform:78af000.serial
+6,95,160689,-;78af000.serial: ttyMSM0 at MMIO 0x78af000 (irq = 29, base_baud = 115199) is a MSM
+6,96,160721,-;msm_serial: console setup on port #0
+6,97,739499,-;printk: console [ttyMSM0] enabled
+6,98,744462,-;msm_serial: driver initialized
+5,99,749030,-;random: fast init done
+5,100,752491,-;random: crng init done
+6,101,759872,-;brd: module loaded
+6,102,764295,-;loop: module loaded
+6,103,766575,-;nand: device found, Manufacturer ID: 0xc8, Chip ID: 0x11
+6,104,766602,-;nand: ESMT F50D1G41LB(2M) SPI NAND 1G 1.8V
+6,105,772830,-;nand: 128 MiB, SLC, erase size: 128 KiB, page size: 2048, OOB size: 64
+6,106,777889,-;qcom-nandc 79b0000.qpic-nand: cfg0 9a3c08d0 cfg1 8287440 ecc_buf_cfg 203 ecc_bch cfg 42040700 cw_size 528 cw_data 516 strength 4 parity_bytes 12 steps 4
+ SUBSYSTEM=platform
+ DEVICE=+platform:79b0000.qpic-nand
+3,107,785584,-;qcom-nandc 79b0000.qpic-nand: Serial training partition not found
+ SUBSYSTEM=platform
+ DEVICE=+platform:79b0000.qpic-nand
+3,108,800236,-;qcom-nandc 79b0000.qpic-nand: failed to enable serial training
+ SUBSYSTEM=platform
+ DEVICE=+platform:79b0000.qpic-nand
+5,109,807347,-;19 fixed-partitions partitions found on MTD device qcom_nand.0
+5,110,813978,-;Creating 19 MTD partitions on "qcom_nand.0":
+5,111,820873,-;0x000000000000-0x000000080000 : "0:SBL1"
+5,112,827791,-;0x000000080000-0x000000100000 : "0:MIBIB"
+5,113,832642,-;0x000000100000-0x000000140000 : "0:BOOTCONFIG"
+5,114,837354,-;0x000000140000-0x000000180000 : "0:BOOTCONFIG1"
+5,115,842684,-;0x000000180000-0x000000280000 : "0:QSEE"
+5,116,848962,-;0x000000280000-0x000000380000 : "0:QSEE_1"
+5,117,854122,-;0x000000380000-0x0000003c0000 : "0:DEVCFG"
+5,118,858387,-;0x0000003c0000-0x000000400000 : "0:DEVCFG_1"
+5,119,863446,-;0x000000400000-0x000000440000 : "0:CDT"
+5,120,868978,-;0x000000440000-0x000000480000 : "0:CDT_1"
+5,121,873606,-;0x000000480000-0x000000500000 : "0:APPSBLENV"
+5,122,879048,-;0x000000500000-0x000000640000 : "0:APPSBL"
+5,123,885090,-;0x000000640000-0x000000780000 : "0:APPSBL_1"
+5,124,890218,-;0x000000780000-0x000000880000 : "0:ART"
+5,125,895363,-;0x000000880000-0x000000900000 : "0:TRAINING"
+5,126,899507,-;0x000000900000-0x000000980000 : "bdata"
+5,127,905002,-;0x000000980000-0x000000a00000 : "crash"
+5,128,909673,-;0x000000a00000-0x000000a80000 : "crash_log"
+5,129,914481,-;0x000000a80000-0x000007f00000 : "rootfs"
+5,130,1027896,-;mtd: device 18 (rootfs) set to be root filesystem
+1,131,1028203,-;mtdsplit: no squashfs found in "rootfs"
+6,132,1033920,-;libphy: Fixed MDIO Bus: probed
+6,133,1257646,-;qca-mdio 88000.mdio: Could not find phy-reset-gpio
+ SUBSYSTEM=platform
+ DEVICE=+platform:88000.mdio
+6,134,1257850,-;libphy: qca_mdio: probed
+6,135,1262966,-;qca-mdio 88000.mdio: qca-mdio driver was registered
+ SUBSYSTEM=platform
+ DEVICE=+platform:88000.mdio
+6,136,1706773,-;qca-mdio 90000.mdio: Could not find phy-reset-gpio
+ SUBSYSTEM=platform
+ DEVICE=+platform:90000.mdio
+6,137,1706974,-;libphy: qca_mdio: probed
+6,138,1714234,-;qca-mdio 90000.mdio: qca-mdio driver was registered
+ SUBSYSTEM=platform
+ DEVICE=+platform:90000.mdio
+6,139,1825622,-;i2c /dev entries driver
+3,140,1826432,-;qcom-tsens 4a9000.thermal-sensor: tsens device is not enabled
+ SUBSYSTEM=platform
+ DEVICE=+platform:4a9000.thermal-sensor
+4,141,1829696,-;cpufreq: cpufreq_online: CPU0: Running at unlisted freq: 799999 KHz
+4,142,1834981,-;cpufreq: cpufreq_online: CPU0: Unlisted initial frequency changed to: 800000 KHz
+6,143,1843701,-;sdhci: Secure Digital Host Controller Interface driver
+6,144,1850741,-;sdhci: Copyright(c) Pierre Ossman
+6,145,1856663,-;sdhci-pltfm: SDHCI platform and OF driver helper
+6,146,1861496,-;\x0aVersion Rollback Feature Disabled
+6,147,1869131,-;remoteproc remoteproc0: cd00000.remoteproc is available
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,148,1873410,-;remoteproc remoteproc1: 4ab000.remoteproc_pd1 is available
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+6,149,1879580,-;remoteproc remoteproc2: cd00000.remoteproc:remoteproc_pd2 is available
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+6,150,1885768,-;coresight-tmc 6048000.tmc: No Q6 ETR memory region specified
+ SUBSYSTEM=amba
+ DEVICE=+amba:6048000.tmc
+3,151,1892874,-;coresight-tmc 6047000.tmc: failed to get flush cti, defer probe
+ SUBSYSTEM=amba
+ DEVICE=+amba:6047000.tmc
+4,152,1899848,-;coresight-dynamic-funnel 6041000.funnel: Uses obsolete Coresight DT bindings
+ SUBSYSTEM=amba
+ DEVICE=+amba:6041000.funnel
+6,153,1908829,-;coresight coresight-etm0: CPU0: ETM v4.0 initialized
+ SUBSYSTEM=coresight
+ DEVICE=+coresight:coresight-etm0
+6,154,1914631,-;coresight-etm4x 619c000.etm: CPU0: (null) initialized
+ SUBSYSTEM=amba
+ DEVICE=+amba:619c000.etm
+6,155,1921174,-;coresight coresight-etm1: CPU1: ETM v4.0 initialized
+ SUBSYSTEM=coresight
+ DEVICE=+coresight:coresight-etm1
+6,156,1926661,-;coresight-etm4x 619d000.etm: CPU1: (null) initialized
+ SUBSYSTEM=amba
+ DEVICE=+amba:619d000.etm
+6,157,1932944,-;coresight-stm 6002000.stm: coresight-stm : stm_register_device failed, probing deferred
+ SUBSYSTEM=amba
+ DEVICE=+amba:6002000.stm
+3,158,1938919,-;OF: graph: no port node found in /soc/cti@6010000
+3,159,1947863,-;OF: graph: no port node found in /soc/cti@6011000
+3,160,1953687,-;OF: graph: no port node found in /soc/cti@6012000
+3,161,1959468,-;OF: graph: no port node found in /soc/cti@6013000
+3,162,1965130,-;OF: graph: no port node found in /soc/cti@6014000
+3,163,1970936,-;OF: graph: no port node found in /soc/cti@6015000
+3,164,1976650,-;OF: graph: no port node found in /soc/cti@6016000
+3,165,1982332,-;OF: graph: no port node found in /soc/cti@6017000
+3,166,1988097,-;OF: graph: no port node found in /soc/cti@6018000
+3,167,1993796,-;OF: graph: no port node found in /soc/cti@6019000
+3,168,1999575,-;OF: graph: no port node found in /soc/cti@601a000
+3,169,2005231,-;OF: graph: no port node found in /soc/cti@601b000
+3,170,2011045,-;OF: graph: no port node found in /soc/cti@601c000
+3,171,2016794,-;OF: graph: no port node found in /soc/cti@601d000
+3,172,2022419,-;OF: graph: no port node found in /soc/cti@601e000
+3,173,2028222,-;OF: graph: no port node found in /soc/cti@601f000
+3,174,2033882,-;OF: graph: no port node found in /soc/cti@6198000
+3,175,2039688,-;OF: graph: no port node found in /soc/cti@6199000
+3,176,2045370,-;OF: graph: no port node found in /soc/cti@610c000
+3,177,2052177,-;OF: graph: no port node found in /soc/hwevent@6101000
+3,178,2056617,-;coresight-hwevent 6101000.hwevent: No csr data
+ SUBSYSTEM=platform
+ DEVICE=+platform:6101000.hwevent
+3,179,2062989,-;OF: graph: no port node found in /soc/csr@6001000
+6,180,2068194,-;coresight-csr 6001000.csr: CSR initialized: coresight-csr
+ SUBSYSTEM=platform
+ DEVICE=+platform:6001000.csr
+6,181,2075791,-;NET: Registered protocol family 10
+6,182,2081354,-;Segment Routing with IPv6
+6,183,2084655,-;NET: Registered protocol family 17
+6,184,2088549,-;8021q: 802.1Q VLAN Support v1.8
+5,185,2092838,-;Registering SWP/SWPB emulation handler
+6,186,2109682,-;coresight-tmc 6048000.tmc: No Q6 ETR memory region specified
+ SUBSYSTEM=amba
+ DEVICE=+amba:6048000.tmc
+6,187,2109854,-;sps_register_bam_device: sps:BAM 0x06064000 is registered
+6,188,2116712,-;coresight coresight-stm: STM32 initialized
+ SUBSYSTEM=coresight
+ DEVICE=+coresight:coresight-stm
+5,189,2122148,-;ubi0: attaching mtd18
+5,190,2605316,-;ubi0: scanning is finished
+5,191,2611837,-;ubi0: attached mtd18 (name "rootfs", size 116 MiB)
+5,192,2611863,-;ubi0: PEB size: 131072 bytes (128 KiB), LEB size: 126976 bytes
+5,193,2616621,-;ubi0: min./max. I/O unit sizes: 2048/2048, sub-page size 2048
+5,194,2623411,-;ubi0: VID header offset: 2048 (aligned 2048), data offset: 4096
+5,195,2630302,-;ubi0: good PEBs: 932, bad PEBs: 0, corrupted PEBs: 0
+5,196,2637061,-;ubi0: user volume: 3, internal volumes: 1, max. volumes count: 128
+5,197,2643291,-;ubi0: max/mean erase counter: 2/0, WL threshold: 4096, image sequence number: 1681737336
+5,198,2650342,-;ubi0: available PEBs: 0, total reserved PEBs: 932, PEBs reserved for bad PEB handling: 20
+5,199,2659695,-;ubi0: background thread "ubi_bgt0d" started, PID 84
+6,200,2669538,-;block ubiblock0_1: created from ubi0:1(rootfs)
+ SUBSYSTEM=block
+ DEVICE=b254:0
+6,201,2674463,-;hctosys: unable to open rtc device (rtc0)
+6,202,2680665,-;ALSA device list:
+6,203,2685125,-;  No soundcards found.
+6,204,2692131,-;VFS: Mounted root (squashfs filesystem) readonly on device 254:0.
+6,205,2693332,-;Freeing unused kernel memory: 1024K
+6,206,2725727,-;Run /sbin/init as init process
+14,207,2934633,-;init: Console is alive
+14,208,2934864,-;init: - watchdog -
+14,209,3546658,-;kmodloader: loading kernel modules from /etc/modules-boot.d/*
+14,210,3558584,-;kmodloader: done loading kernel modules from /etc/modules-boot.d/*
+14,211,3560622,-;init: - preinit -
+5,212,7393812,-;UBIFS (ubi0:2): Mounting in unauthenticated mode
+5,213,7394065,-;UBIFS (ubi0:2): background thread "ubifs_bgt0_2" started, PID 164
+5,214,7425390,-;UBIFS (ubi0:2): recovery needed
+5,215,7498128,-;UBIFS (ubi0:2): recovery completed
+5,216,7498286,-;UBIFS (ubi0:2): UBIFS: mounted UBI device 0, volume 2, name "rootfs_data"
+5,217,7501464,-;UBIFS (ubi0:2): LEB size: 126976 bytes (124 KiB), min./max. I/O unit sizes: 2048 bytes/2048 bytes
+5,218,7509425,-;UBIFS (ubi0:2): FS size: 68820992 bytes (65 MiB, 542 LEBs), journal size 3428352 bytes (3 MiB, 27 LEBs)
+5,219,7519291,-;UBIFS (ubi0:2): reserved for root: 3250585 bytes (3174 KiB)
+5,220,7529520,-;UBIFS (ubi0:2): media format: w5/r0 (latest is w5/r0), UUID C0DA3F10-9F96-4F51-8FF5-EA0EF1570665, small LPT model
+14,221,7540320,-;mount_root: switching to ubifs overlay
+12,222,7557709,-;urandom-seed: Seeding with /etc/urandom.seed
+14,223,7621207,-;procd: - early -
+14,224,7621319,-;procd: - watchdog -
+14,225,8186731,-;procd: - watchdog -
+14,226,8188493,-;procd: - ubus -
+14,227,8243723,-;procd: - init -
+14,228,8674552,-;urngd: v1.0.2 started.
+14,229,8730885,-;kmodloader: loading kernel modules from /etc/modules.d/*
+4,230,8755006,-;ssdk_switch_device_num_init[1210]:INFO:ess-switch dts node number: 2
+4,231,8755067,-;ssdk_dt_get_switch_node[1015]:INFO:ess-switch DT exist!
+4,232,8761599,-;ssdk_dt_parse_access_mode[901]:INFO:switch_access_mode: local bus
+4,233,8770035,-;ssdk_dt_parse_access_mode[914]:INFO:switchreg_base_addr: 0x39c00000
+4,234,8774740,-;ssdk_dt_parse_access_mode[915]:INFO:switchreg_size: 0x200000
+4,235,8781955,-;ssdk_dt_parse_mac_mode[304]:INFO:mac mode = 0xf
+4,236,8788844,-;ssdk_dt_parse_mac_mode[310]:INFO:mac mode1 doesn't exit!
+4,237,8794096,-;ssdk_dt_parse_mac_mode[319]:INFO:mac mode2 doesn't exit!
+4,238,8800790,-;ssdk_dt_parse_port_bmp[802]:INFO:port_bmp doesn't exist!
+4,239,8807090,-;ssdk_dt_parse_uniphy[341]:INFO:ess-uniphy DT exist!
+4,240,8813371,-;ssdk_dt_parse_led[988]:INFO:current dts led_source_num is 0
+4,241,8819050,-;ssdk_plat_init start
+4,242,11395464,-;ssdk_mp_reset_init[812]:INFO:MP reset successfully!
+4,243,11395527,-;ssdk_gcc_clock_init[1206]:INFO:SSDK gcc clock init successfully!
+4,244,11400778,-;mpge_phy_api_ops_init[1089]:INFO:qca probe mpge phy driver succeeded!
+4,245,11407918,-;mpge_phy_dac_set[917]:INFO:phy mdac is set as 0x10
+4,246,11414895,-;mpge_phy_dac_set[929]:INFO:phy edac is set as 0x10
+4,247,11420661,-;regi_init[3788]:INFO:Initializing SCOMPHY!
+4,248,12589519,-;_adpt_mp_uniphy_clk_output_ctrl_set[236]:INFO:uniphy will output clock as 25000000Hz
+4,249,12589639,-;ssdk_switch_register[1862]:INFO:Chip version 0xee
+4,250,12597434,-;qca_link_polling_select[1370]:INFO:link-polling-required node does not exist
+4,251,12603002,-;ssdk_switch_register[1896]:INFO:polling is selected
+4,252,12611189,-;regi_init[3798]:INFO:Initializing SCOMPHY Done!!
+4,253,12616847,-;ssdk_dt_get_switch_node[1015]:INFO:ess-switch DT exist!
+4,254,12622707,-;ssdk_dt_parse_access_mode[901]:INFO:switch_access_mode: mdio
+4,255,12628720,-;ssdk_dt_parse_mac_mode[301]:INFO:mac mode doesn't exit!
+4,256,12635655,-;ssdk_dt_parse_mac_mode[310]:INFO:mac mode1 doesn't exit!
+4,257,12641627,-;ssdk_dt_parse_mac_mode[319]:INFO:mac mode2 doesn't exit!
+4,258,12648282,-;ssdk_dt_parse[1112]:INFO:switch node is qca83xx!
+4,259,12654561,-;ssdk_plat_init start
+4,260,12724738,-;f1_phy_api_ops_init[1603]:INFO:qca probe f1 phy driver succeeded!
+4,261,12724760,-;regi_init[3737]:INFO:Initializing ISISC!!
+3,262,12730879,-;OF: /soc/ess-instance/ess-switch1@1: could not get #gpio-cells for /soc/phy@86000
+4,263,12735904,-;qca_ar8327_gpio_reset[3663]:ERROR:gpio26 request failed, ret:-517
+4,264,12744544,-;ssdk_switch_register[1870]:INFO:Chip version 0x1302
+4,265,12751544,-;qca_link_polling_select[1370]:INFO:link-polling-required node does not exist
+4,266,12757254,-;ssdk_switch_register[1896]:INFO:polling is selected
+4,267,14526678,-;regi_init[3742]:INFO:Initializing ISISC Done!!
+4,268,14526783,-;regi_init[3824]:INFO:qca-ssdk module init succeeded!
+6,269,14533531,-;tun: Universal TUN/TAP device driver, 1.6
+6,270,14541207,-;(unnamed net_device) (uninitialized): nss_dp_gmac: Registering netdev eth%d(qcom-id:1) with GMAC, mac_base: 0x90f10000
+6,271,14544232,-;(unnamed net_device) (uninitialized): nss_dp_gmac: Registering netdev eth%d(qcom-id:2) with GMAC, mac_base: 0x90f30000
+6,272,14555301,-;**********************************************************
+6,273,14565661,-;* NSS Data Plane driver
+6,274,14572018,-;**********************************************************
+1,275,14720121,-;nss_driver - fw of size 781856  bytes copied to load addr: 40000000, nss_id : 0
+1,276,14722167,-;Supported Frequencies - 
+1,277,14722175,-;850 MHz 
+1,278,14727402,-;1 GHz 
+1,279,14731093,-;
+1,280,14735227,-;7f101e40: set sdma 8e8c3a00
+1,281,14737330,-;node size 2 # items 4
+1,282,14740315,-;memory: 40000000 268435456 (avl 198664192) items 4 active_cores 1
+1,283,14743790,-;addr/size storage words 2 2 # words 4 in DTS, ddr size 800000
+1,284,14752298,-;7f101e40: NSS core 0 DDR from 40000000 to 40800000
+1,285,14758020,-;7f101e40: meminfo init succeed
+6,286,14777475,-;gre: GRE over IPv4 demultiplexor driver
+6,287,14780175,-;ip_gre: GRE over IPv4 tunneling driver
+1,288,14794746,-;node size 2 # items 4
+1,289,14794779,-;memory: 40000000 268435456 (avl 198664192) items 4 active_cores 1
+1,290,14797135,-;addr/size storage words 2 2 # words 4 in DTS, ddr size 800000
+1,291,14804184,-;7f101e40: nss core 0 booted successfully
+5,292,14841190,-;nss_wifi_meshmgr_init_module[1997]:Module Build Id: 08/16/26, 06:46:16 loaded
+6,293,14848489,-;Loading modules backported from Linux version ab1f9ff
+6,294,14848528,-;Backport generated by backports.git ab1f9ff
+6,295,14916405,-;xt_time: kernel timezone is -0000
+6,296,15055265,-;PPP generic driver version 2.4.2
+6,297,15061589,-;NET: Registered protocol family 24
+6,298,15063788,-;PPTP driver version 0.8.5
+6,299,15143593,-;ath11k c000000.wifi: ipq5018 hw1.0
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,300,15144095,-;remoteproc remoteproc1: powering up 4ab000.remoteproc_pd1
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+6,301,15199271,-;remoteproc remoteproc1: Booting fw image IPQ5018/q6_fw.mdt, size 1820
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+6,302,15199379,-;remoteproc remoteproc0: powering up cd00000.remoteproc
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,303,15206607,-;remoteproc remoteproc0: Booting fw image IPQ5018/q6_fw.mdt, size 1820
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,304,16807445,-;Subsystem error monitoring/handling services are up
+6,305,16925489,-;remoteproc remoteproc0: remote processor cd00000.remoteproc is now up
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc0
+6,306,16935594,-;Subsystem error monitoring/handling services are up
+6,307,16955182,-;ath11k c000000.wifi: chip_id 0x0 chip_family 0x4 board_id 0x10 soc_id 0xffffffff
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,308,16955215,-;ath11k c000000.wifi: fw_version 0x270206d0 fw_build_timestamp 2022-08-04 13:28 fw_build_id QC_IMAGE_VERSION_STRING=WLAN.HK.2.7.0.1-01744-QCAHKSWPL_SILICONZ-1
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,309,16981763,-;ath11k c000000.wifi: qmi caldata downloaded: type: 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,310,17055473,-;remoteproc remoteproc1: remote processor 4ab000.remoteproc_pd1 is now up
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc1
+3,311,17062503,-;ath11k c000000.wifi: No qcom,pta_num entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+3,312,17062531,-;ath11k c000000.wifi: No qcom,coex_mode entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,313,17065548,-;ath11k soc:wifi1@c000000: qcn6122
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+3,314,17068340,-;ath11k c000000.wifi: No qcom,bt-active-time entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,315,17075293,-;remoteproc remoteproc2: powering up cd00000.remoteproc:remoteproc_pd2
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+3,316,17079387,-;ath11k c000000.wifi: No qcom,bt-priority-time entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,317,17086242,-;remoteproc remoteproc2: Booting fw image IPQ5018/q6_fw.mdt, size 1820
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+3,318,17093533,-;ath11k c000000.wifi: No qcom,coex-algo entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+3,319,17093540,-;ath11k c000000.wifi: No qcom,pta-priority entry in dev-tree.
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,320,17117291,-;Subsystem error monitoring/handling services are up
+4,321,17198468,-;ath11k soc:wifi1@c000000: qmi ignore invalid mem req type 10
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+6,322,17236815,-;remoteproc remoteproc2: remote processor cd00000.remoteproc:remoteproc_pd2 is now up
+ SUBSYSTEM=remoteproc
+ DEVICE=+remoteproc:remoteproc2
+14,323,17238604,-;kmodloader: done loading kernel modules from /etc/modules.d/*
+6,324,17332910,-;ath11k soc:wifi1@c000000: chip_id 0x0 chip_family 0x4 board_id 0x60 soc_id 0xffffffff
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+6,325,17332950,-;ath11k soc:wifi1@c000000: fw_version 0x270206d0 fw_build_timestamp 2022-08-04 13:28 fw_build_id QC_IMAGE_VERSION_STRING=WLAN.HK.2.7.0.1-01744-QCAHKSWPL_SILICONZ-1
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+4,326,17340894,-;ath11k c000000.wifi: Direct firmware load for ath11k/IPQ5018/hw1.0/qdss_trace_config.bin failed with error -2
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,327,17340904,-;ath11k c000000.wifi: Falling back to sysfs fallback for: ath11k/IPQ5018/hw1.0/qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,328,17384698,-;ath11k soc:wifi1@c000000: qmi caldata downloaded: type: 2
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+7,329,17597694,-;ieee80211 phy1: copying sband (band 1) due to VHT EXT NSS BW flag
+ SUBSYSTEM=ieee80211
+ DEVICE=+ieee80211:phy1
+4,330,17600439,-;ath11k soc:wifi1@c000000: Direct firmware load for ath11k/qcn6122/hw1.0/qdss_trace_config.bin failed with error -2
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+4,331,17600485,-;ath11k soc:wifi1@c000000: Falling back to sysfs fallback for: ath11k/qcn6122/hw1.0/qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+4,332,17832962,-;ath11k c000000.wifi: Direct firmware load for qdss_trace_config.bin failed with error -2
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,333,17832999,-;ath11k c000000.wifi: Falling back to sysfs fallback for: qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,334,18494962,-;ath11k c000000.wifi: qmi failed to load QDSS config: qdss_trace_config.bin
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+4,335,18494996,-;ath11k c000000.wifi: Failed to download QDSS config to FW: -12
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,336,25868589,-;br-lan: port 1(eth1) entered blocking state
+6,337,25868629,-;br-lan: port 1(eth1) entered disabled state
+6,338,25874867,-;device eth1 entered promiscuous mode
+6,339,25891202,-;br-lan: port 1(eth1) entered blocking state
+6,340,25891245,-;br-lan: port 1(eth1) entered forwarding state
+6,341,25972460,-;nss-dp 39c00000.dp1 eth0: PHY Link up speed: 1000
+ SUBSYSTEM=platform
+ DEVICE=+platform:39c00000.dp1
+6,342,26885996,-;IPv6: ADDRCONF(NETDEV_CHANGE): br-lan: link becomes ready
+6,343,28119028,-;wlan0: Created a NSS virtual interface
+6,344,28137609,-;br-lan: port 2(wlan0) entered blocking state
+6,345,28137647,-;br-lan: port 2(wlan0) entered disabled state
+6,346,28157552,-;device wlan0 entered promiscuous mode
+6,347,28596094,-;ath11k c000000.wifi: bss color param 0xc000000 set on vdev 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:c000000.wifi
+6,348,28597586,-;IPv6: ADDRCONF(NETDEV_CHANGE): wlan0: link becomes ready
+6,349,28603948,-;br-lan: port 2(wlan0) entered blocking state
+6,350,28608334,-;br-lan: port 2(wlan0) entered forwarding state
+3,351,29108409,-;debugfs: File 'virt_if' in directory 'stats' already present!
+6,352,29109021,-;wlan1: Created a NSS virtual interface
+6,353,29123905,-;br-lan: port 3(wlan1) entered blocking state
+6,354,29123931,-;br-lan: port 3(wlan1) entered disabled state
+6,355,29133932,-;device wlan1 entered promiscuous mode
+6,356,29134338,-;br-lan: port 3(wlan1) entered blocking state
+6,357,29138254,-;br-lan: port 3(wlan1) entered forwarding state
+6,358,29160262,-;br-lan: port 3(wlan1) entered disabled state
+6,359,29924731,-;ath11k soc:wifi1@c000000: bss color param 0x11000000 set on vdev 0
+ SUBSYSTEM=platform
+ DEVICE=+platform:soc:wifi1@c000000
+6,360,29928343,-;IPv6: ADDRCONF(NETDEV_CHANGE): wlan1: link becomes ready
+6,361,29936050,-;br-lan: port 3(wlan1) entered blocking state
+6,362,29937389,-;br-lan: port 3(wlan1) entered forwarding state
+6,363,31592449,-;pppoe-wan: renamed from ppp0
+6,364,104330802,-;device eth0 entered promiscuous mode
+6,365,104910117,-;pppoe-wan2: renamed from ppp1
+6,366,130071795,-;pppoe-wan3: renamed from ppp2
+6,367,193036074,-;pppoe-wan4: renamed from ppp3
+6,368,256267309,-;pppoe-wan5: renamed from ppp4
+6,369,362341455,-;pppoe-wan2: renamed from ppp1
+6,370,420412810,-;pppoe-wan2: renamed from ppp1
+6,371,477802647,-;pppoe-wan2: renamed from ppp1
+6,372,533683106,-;pppoe-wan2: renamed from ppp1
+6,373,600478107,-;pppoe-wan2: renamed from ppp1

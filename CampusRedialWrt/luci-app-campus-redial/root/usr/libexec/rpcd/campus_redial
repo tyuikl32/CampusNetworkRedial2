@@ -1,0 +1,380 @@
+#!/usr/bin/env lua
+-- rpcd exec plugin for OpenWrt 21.02: exposes the campus_redial ubus object.
+-- rpcd runs this script with "list" (method signatures) or "call <method>"
+-- (JSON args on stdin, JSON result on stdout).  luci.jsonc stringifies empty
+-- Lua tables as [], so both branches rewrite the empty shapes to {} because
+-- rpcd rejects anything but a table as a method signature or reply.
+
+local json = require "luci.jsonc"
+local fs   = require "nixio.fs"
+
+local RUN_DIR   = "/var/run/campus-redial"
+local DATA_DIR  = "/etc/campus-redial"
+local STATUS_FILE = RUN_DIR .. "/status.json"
+local LOG_FILE  = "/var/log/campus-redial.log"
+
+local function readfile(path)
+	local s = fs.readfile(path)
+	return s and (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function parse_json(value)
+	if not value or value == "" then
+		return nil
+	end
+	local ok, result = pcall(json.parse, value)
+	if ok and type(result) == "table" then
+		return result
+	end
+	return nil
+end
+
+	local function status()
+		local value = readfile(STATUS_FILE)
+		if not value then
+			return {
+				running = false,
+				state = "unavailable",
+				normal = "unknown",
+				mbps200 = "unknown",
+				last_error = "后台服务尚未启动"
+			}
+		end
+
+		local result = parse_json(value)
+		if not result then
+			-- The daemon replaces this file by rename, so a torn read window is
+			-- measured in microseconds. nixio.fs has no sleep; a couple of cheap
+			-- immediate re-reads clear the transient before the UI is told the
+			-- file is broken.
+			for _ = 1, 3 do
+				value = readfile(STATUS_FILE)
+				result = value and parse_json(value) or nil
+				if result then break end
+			end
+		end
+		if not result then
+			return { running = false, state = "error", last_error = "状态文件损坏" }
+		end
+
+		local stats = parse_json(readfile(DATA_DIR .. "/stats.json"))
+		local last  = parse_json(readfile(DATA_DIR .. "/last-run.json"))
+		if stats then result.stats = stats end
+		if last  then result.last_run = last end
+		return result
+	end
+
+local function command(name)
+	if name ~= "start" and name ~= "stop" and name ~= "test" and
+	   name ~= "redial_once" and name ~= "clear_stats" then
+		return { error = "Invalid command" }
+	end
+
+	local sys = require "luci.sys"
+	if sys.call("/usr/sbin/campus-redialctl " .. name) == 0 then
+		return { result = true }
+	end
+	return { error = "后台服务未运行" }
+end
+
+local function logs(args)
+	local lines = tonumber(args.lines)
+	if lines == nil then lines = 80 end
+	if lines < 1 or lines > 200 then
+		return { error = "lines must be between 1 and 200" }
+	end
+
+	local value = readfile(LOG_FILE)
+	if not value or value == "" then
+		return { logs = "" }
+	end
+
+	local tail = {}
+	local count = 0
+	for line in value:gmatch("[^\n]*") do
+		count = count + 1
+		table.insert(tail, line)
+		if #tail > lines then
+			table.remove(tail, 1)
+		end
+	end
+	if count > 0 and tail[#tail] == "" then
+		table.remove(tail)
+	end
+	return { logs = table.concat(tail, "\n") }
+end
+
+-- ------------------------------------------------------------------
+-- SNI desync (zapret) integration. The daemon is installed by
+-- tools/install-sni-desync.sh (see tools/SNI-DESYNC.md); when absent all
+-- methods report installed=false and the UI renders a hint instead of
+-- controls. hostlist lives in /opt/zapret/ipset/zapret-hosts-user.txt,
+-- one domain suffix per line, '#' comments allowed.
+-- ------------------------------------------------------------------
+local ZAPRET_DIR   = "/opt/zapret"
+local ZAPRET_LIST  = ZAPRET_DIR .. "/ipset/zapret-hosts-user.txt"
+local ZAPRET_INIT  = "/etc/init.d/zapret"
+-- "停止"标记：存在时 /etc/firewall.zapret 不再安装 tpws 跳转。
+-- 放在 /var/run（tmpfs）——重启即失效，返回默认的“开启”状态。
+local ZAPRET_OFF_FLAG = "/var/run/zapret.off"
+
+local function zapret_installed()
+	return fs.stat(ZAPRET_DIR) ~= nil
+end
+
+local function zapret_running()
+	local sys = require "luci.sys"
+	-- 注意：不要用 `pgrep -f 'tpws|nfqws'`。luci.sys.exec 会经由
+	-- `/bin/sh -c "<cmd>"` 执行，而那条 shell 自己的命令行里就含 "tpws"，
+	-- pgrep -f 会匹配到自己 → 无论守护进程是否在跑都返回“在运行”。
+	-- 改用 pidof/tool 按进程名精确匹配（shell 的进程名是 sh，不会自我匹配）。
+	local out = sys.exec("pidof tpws 2>/dev/null; pidof nfqws 2>/dev/null")
+	return out ~= nil and out:match("%d") ~= nil
+end
+
+local function zapret_mode()
+	local cfg = readfile("/opt/zapret/config") or ""
+	if cfg:find("TPWS_ENABLE=1", 1, true) then
+		return "tpws"
+	elseif cfg:find("NFQWS_ENABLE=1", 1, true) then
+		return "nfqws"
+	end
+	return "unknown"
+end
+
+local function zapret_hostlist_read()
+	local value = readfile(ZAPRET_LIST)
+	if not value then
+		return nil
+	end
+	local entries = {}
+	for line in value:gmatch("[^\r\n]+") do
+		line = (line:gsub("%s+", ""))
+		if line ~= "" and line:sub(1, 1) ~= "#" then
+			table.insert(entries, line)
+		end
+	end
+	return entries
+end
+
+local function zapret_status()
+	if not zapret_installed() then
+		return { installed = false, running = false, mode = "none" }
+	end
+	local sys = require "luci.sys"
+	local result = {
+		installed = true,
+		running   = zapret_running(),
+		mode      = zapret_mode(),
+		enabled   = fs.access("/etc/rc.d/S21zapret") ~= nil
+	}
+	-- fw3 tpws mode: nat DNAT rule packet/byte counters (iptables -L -v).
+	local line = tostring(sys.exec(
+		"iptables -t nat -L PREROUTING -v -n 2>/dev/null | grep -m1 '127.0.0.127:988'"))
+	local pkts = line:match("^%s*(%d+)") or "0"
+	local bytes = line:match("^%s*%d+%s+(%d+)") or "0"
+	result.redirect_pkts  = pkts
+	result.redirect_bytes = bytes
+	-- redirect = LAN 80/443 是否仍被 DNAT 到 tpws。running 与 redirect 不一致
+	-- 就是故障态：running 而 !redirect 说明分流没接上；!running 而 redirect
+	-- 说明跳转残留、所有网页会 connection refused（面板也会打不开）。
+	result.redirect = line:match("127%.0%.0%.127:988") ~= nil
+	result.off      = fs.access(ZAPRET_OFF_FLAG) ~= nil
+	local hosts = zapret_hostlist_read() or {}
+	result.hostlist_count = #hosts
+	result.updated_at = os.date("%Y-%m-%d %H:%M:%S")
+	return result
+end
+
+local function zapret_hostlist_read_method()
+	local hosts = zapret_hostlist_read()
+	if hosts == nil then
+		return { error = "无法读取 hostlist（zapret 未安装？）" }
+	end
+	return { hostlist = table.concat(hosts, "\n"), installed = true }
+end
+
+-- SNI 分流的“开 / 关”必须同时管理两层状态，缺一不可：
+--   1) tpws 守护进程（procd 实例）
+--   2) nat PREROUTING/OUTPUT 上把 LAN 80/443 DNAT 到 127.0.0.127:988 的跳转
+-- 历史缺陷：旧实现只做 (1)。停掉 tpws 后跳转仍在，所有经 br-lan 的 80/443
+-- 都指向已关闭端口 → 客户端一律 connection refused；而 LuCI 面板自己也在
+-- 80 端口，于是连管理页都打不开，看起来就像“死机”。
+-- 现在的顺序（stop）：
+--   touch /var/run/zapret.off  → 让 /etc/firewall.zapret 在 fw3 重载时不再补回跳转
+--   /etc/init.d/zapret stop_fw → 摘掉跳转（此刻起流量直连，网络恢复）
+--   /etc/init.d/zapret stop    → 停守护进程
+-- 之所以先摘跳转再停进程：避免出现“跳转到死端口”的时间窗口。
+-- 启动侧相反：先起进程，再补跳转（避免“有跳转无监听”）。
+--
+-- 语义：**仅运行时停止**，与 OpenWrt 原生 `stop` 一致 —— 不 disable 服务，
+-- 所以重启后自动恢复为开启。/var/run 是 tmpfs，标记也随重启失效。
+local function zapret_apply_action(action)
+	local sys = require "luci.sys"
+	local cmd
+	if action == "stop" then
+		cmd = "touch " .. ZAPRET_OFF_FLAG ..
+			"; " .. ZAPRET_INIT .. " stop_fw" ..
+			"; " .. ZAPRET_INIT .. " stop"
+	elseif action == "restart" then
+		cmd = "rm -f " .. ZAPRET_OFF_FLAG ..
+			"; " .. ZAPRET_INIT .. " restart" ..
+			"; " .. ZAPRET_INIT .. " restart_fw"
+	else
+		cmd = "rm -f " .. ZAPRET_OFF_FLAG ..
+			"; " .. ZAPRET_INIT .. " start" ..
+			"; " .. ZAPRET_INIT .. " start_fw"
+	end
+	-- 整条有序命令后台执行：既不阻塞 ubus 响应（uhttpd 的 chunked 连接在
+	-- init 脚本静默数秒后会被掐断，客户端收到 IncompleteRead），又保证
+	-- touch → stop_fw → stop 的先后顺序。前端会在随后 1.2s / 3.2s 轮询状态。
+	sys.call("( " .. cmd .. " ) >/dev/null 2>&1 &")
+end
+
+local function zapret_hostlist_write(args)
+	if not zapret_installed() then
+		return { error = "zapret 未安装" }
+	end
+	local content = tostring(args.hostlist or "")
+	-- 域名/注释白名单：字母数字点连字符、'#' 注释、空白
+	local lines = {}
+	for line in content:gmatch("[^\n]+") do
+		line = line:gsub("%s+$", ""):gsub("^%s+", "")
+		if line ~= "" then
+			if line:sub(1, 1) == "#" then
+				-- keep comments
+			elseif not line:match("^[A-Za-z0-9%-%.%*]+$") then
+				return { error = "非法域名行: " .. line }
+			end
+			table.insert(lines, line)
+		end
+	end
+	local fh = io.open("/opt/zapret/ipset/zapret-hosts-user.txt", "w")
+	if not fh then
+		return { error = "无法写入 hostlist 文件" }
+	end
+	fh:write(table.concat(lines, "\n") .. (#lines > 0 and "\n" or ""))
+	fh:close()
+	-- 保存名单 = 明确要启用分流：走 restart（会清停止标记 + 重启进程 + 补跳转），
+	-- 否则用户先“停止”再保存名单会得到“进程在跑但流量没接管”的错位状态。
+	zapret_apply_action("restart")
+	return { result = true, count = #lines, installed = true }
+end
+
+local function zapret_service(args)
+	local action = tostring(args.action or "")
+	if action ~= "restart" and action ~= "start" and action ~= "stop" then
+		return { error = "action 必须是 restart/stop/start" }
+	end
+	if not zapret_installed() then
+		return { error = "zapret 未安装" }
+	end
+	zapret_apply_action(action)
+	return { result = true, action = action }
+end
+
+local methods = {
+	status = {
+		call = function()
+			return status()
+		end
+	},
+	start = {
+		call = function()
+			return command("start")
+		end
+	},
+	stop = {
+		call = function()
+			return command("stop")
+		end
+	},
+	test = {
+		call = function()
+			return command("test")
+		end
+	},
+	redial_once = {
+		call = function()
+			return command("redial_once")
+		end
+	},
+	clear_stats = {
+		call = function()
+			return command("clear_stats")
+		end
+	},
+	logs = {
+		args = { lines = 0 },
+		call = logs
+	},
+	zapret_status = {
+		call = function()
+			return zapret_status()
+		end
+	},
+	zapret_hostlist_get = {
+		call = function()
+			return zapret_hostlist_read_method()
+		end
+	},
+	zapret_hostlist_set = {
+		args = { hostlist = "" },
+		call = zapret_hostlist_write
+	},
+	zapret_service = {
+		args = { action = "" },
+		call = zapret_service
+	}
+}
+
+if arg[1] == "list" then
+	local rv = {}
+	for name, method in pairs(methods) do
+		rv[name] = method.args or {}
+	end
+	print((json.stringify(rv):gsub(":%[%]", ":{}")))
+elseif arg[1] == "call" then
+	local parse = json.new()
+	local done, err
+
+	while true do
+		local chunk = io.read(4096)
+		if not chunk then
+			break
+		elseif not done and not err then
+			done, err = parse:parse(chunk)
+		end
+	end
+
+	if not done then
+		print(json.stringify({ error = err or "Incomplete input" }))
+		os.exit(1)
+	end
+
+	local uargs = parse:get()
+	local method = methods[arg[2]]
+	if not method then
+		print(json.stringify({ error = "Method not found" }))
+		os.exit(1)
+	end
+
+	if type(uargs) ~= "table" then
+		print(json.stringify({ error = "Invalid arguments" }))
+		os.exit(1)
+	end
+
+	uargs.ubus_rpc_session = nil
+
+	local margs = method.args or {}
+	for k, v in pairs(uargs) do
+		if margs[k] == nil or (v ~= nil and type(v) ~= type(margs[k])) then
+			print(json.stringify({ error = "Invalid arguments" }))
+			os.exit(1)
+		end
+	end
+
+	local result = method.call(uargs)
+	print((json.stringify(result):gsub("^%[%]$", "{}")))
+	os.exit(0)
+end

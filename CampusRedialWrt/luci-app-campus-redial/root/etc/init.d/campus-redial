@@ -1,0 +1,56 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	# Recreate runtime state before procd forks the daemon. This also makes
+	# upgrades/manual cleanup safe while keeping the directory private.
+	mkdir -p /var/run/campus-redial /etc/campus-redial
+	chmod 700 /var/run/campus-redial /etc/campus-redial
+	# Drop a stale command left by a previous procd stop before starting.
+	rm -f /var/run/campus-redial/control
+	procd_open_instance
+	procd_set_param command /usr/sbin/campus-rediald
+	procd_set_param pidfile /var/run/campus-redial/daemon.pid
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+stop_service() {
+	[ -x /usr/sbin/campus-redialctl ] && /usr/sbin/campus-redialctl stop >/dev/null 2>&1
+	# Remove the procd instance before the defensive PID cleanup; otherwise
+	# procd may respawn a worker while stop_service is killing it.
+	procd_kill campus-redial 2>/dev/null || true
+	if [ -r /var/run/campus-redial/daemon.pid ]; then
+		pid=$(cat /var/run/campus-redial/daemon.pid 2>/dev/null || true)
+		case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+	fi
+	# procd normally reaps the process. The fallback prevents duplicate
+	# workers after an interrupted upgrade or a manual start/stop race.
+	if command -v killall >/dev/null 2>&1; then
+		killall campus-rediald 2>/dev/null || true
+	fi
+	# BusyBox may expose the interpreter name as `{campus-rediald}` and
+	# therefore not match killall. Match the command line explicitly.
+	for pid in $(ps w 2>/dev/null | awk '/[c]ampus-rediald/ { print $1 }'); do
+		kill "$pid" 2>/dev/null || true
+	done
+	sleep 1
+	for pid in $(ps w 2>/dev/null | awk '/[c]ampus-rediald/ { print $1 }'); do
+		kill -9 "$pid" 2>/dev/null || true
+	done
+	# If the daemon was killed before it consumed the stop control record,
+	# prevent LuCI from showing a stale running=true snapshot after service
+	# removal or an upgrade.
+	if [ -r /var/run/campus-redial/status.json ]; then
+		tmp=/var/run/campus-redial/status.stop.$$
+		sed 's/"running":true/"running":false/; s/"state":"[^"]*"/"state":"stopped"/' \
+			/var/run/campus-redial/status.json > "$tmp" 2>/dev/null && mv -f "$tmp" /var/run/campus-redial/status.json
+		rm -f "$tmp"
+	fi
+	rm -f /var/run/campus-redial/control /var/run/campus-redial/worker.pid
+}

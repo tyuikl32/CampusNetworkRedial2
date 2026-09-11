@@ -1,0 +1,67 @@
+#!/bin/sh
+# campus-redial-mwan3route <iface> — make sure the mwan3 routing table owned
+# by a pool session holds a usable default route.
+#
+# Background (verified on 21.02.7 / mwan3 2.10.13): netifd only installs a
+# default route into the *main* table for the primary PPPoE session. mwan3
+# builds its per-interface tables by copying from main, so every extra pool
+# session (wan2, wan3, ...) ends up with a table that has no default route.
+# mwan3 then flags it "error (16)" and silently drops it from the policy —
+# all traffic falls back to wan even though the session itself is fine.
+#
+# Fix: on every session-up, (re)install a default route into that session's
+# mwan3 table directly. mwan3 notices immediately; no reload/restart needed.
+# The route is runtime-only and disappears with the interface, so calling
+# this again on the next redial is the correct lifecycle.
+#
+# Table lookup replicates mwan3's own mwan3_update_iface_to_table(): the
+# table id is the 1-based position of the interface section in
+# /etc/config/mwan3 (section order, family agnostic).
+
+. /lib/functions.sh
+
+IFACE=$1
+[ -n "$IFACE" ] || { echo "usage: $0 <iface>" >&2; exit 1; }
+
+# --- locate the mwan3 table id for this interface -------------------------
+# Empty when mwan3 does not know this interface (e.g. pool mwan3 integration
+# not enabled) — that is not an error, just nothing for us to do.
+TABLE_ID=
+tid=0
+update_table() {
+	tid=$((tid + 1))
+	[ "$1" = "$IFACE" ] && TABLE_ID=$tid
+}
+config_load mwan3
+config_foreach update_table interface
+[ -n "$TABLE_ID" ] || exit 0
+
+# --- locate the L3 device --------------------------------------------------
+DEVICE=$(ifstatus "$IFACE" 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+[ -n "$DEVICE" ] || DEVICE="pppoe-$IFACE"
+ip link show dev "$DEVICE" >/dev/null 2>&1 || exit 0
+
+# --- peer gateway (PPPoE sessions are point-to-point) ----------------------
+# "inet 10.194.32.99 peer 10.194.255.254/32" -> 10.194.255.254
+PEER=$(ip -4 addr show dev "$DEVICE" 2>/dev/null | sed -n 's/.* peer \([0-9.]*\).*/\1/p' | head -n 1)
+
+# --- (re)install the default route -----------------------------------------
+# "replace" keeps this idempotent across redials: if the carrier gateway
+# changed since the last session, the stale route is updated in one step.
+if [ -n "$PEER" ]; then
+	ip route replace default via "$PEER" dev "$DEVICE" table "$TABLE_ID" || {
+		logger -t campus-redial -p daemon.warn \
+			"mwan3route: failed to set default via $PEER dev $DEVICE table $TABLE_ID"
+		exit 1
+	}
+else
+	ip route replace default dev "$DEVICE" table "$TABLE_ID" || {
+		logger -t campus-redial -p daemon.warn \
+			"mwan3route: failed to set default dev $DEVICE table $TABLE_ID"
+		exit 1
+	}
+fi
+
+logger -t campus-redial -p daemon.info \
+	"mwan3route: $IFACE -> table $TABLE_ID default via ${PEER:-link} dev $DEVICE"
+exit 0

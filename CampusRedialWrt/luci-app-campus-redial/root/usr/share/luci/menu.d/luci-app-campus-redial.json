@@ -1,0 +1,14 @@
+{
+    "admin/services/campus-redial": {
+        "title": "校园网自动重拨和集流",
+        "order": 50,
+        "action": {
+            "type": "view",
+            "path": "campus-redial/overview"
+        },
+        "depends": {
+            "acl": [ "luci-app-campus-redial" ],
+            "uci": { "campus-redial": true }
+        }
+    }
+}

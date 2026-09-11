@@ -1,0 +1,3 @@
+streaming kernel log to D:/CampusNetworkRedial/kmod-build/capture-macvlan-1.log
+=== trigger: sh /tmp/cr-load.sh > /tmp/cr-load.out 2>&1 ===
+trigger rc=0
