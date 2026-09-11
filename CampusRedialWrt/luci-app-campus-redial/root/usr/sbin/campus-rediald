@@ -1014,14 +1014,18 @@ cancel_speed_children() {
 }
 
 run_speed_test_session() {
-	# The pool guarantees this is the only running speed test (speed token).
-	# The preload helper binds every download socket to this PPP session (or its
-	# negotiated source address when PPP rejects SO_BINDTODEVICE). The result is
-	# intentionally treated as a routing/health signal, not a lab-grade metric.
-	# Streams never write download blobs to disk: each worker counts its bytes
-	# (curl's size_download, or a pipe to wc for uclient-fetch) into a small
-	# per-stream result file. /var/run is a tiny tmpfs; large blobs there broke
-	# status writes with 状态文件损坏 when the tmpfs filled up.
+	# 测量方法（2026-09-11 重做；原因与实测数据见 docs/05-故障排查.md）：
+	#   1) **按会话打 mwan3 的 fwmark**。历史实现只绑源地址，而内核按主路由表选路、
+	#      mwan3 按 mark 选表 ⇒ "源 IP 属于 A 会话、流量却从 B 会话出去"，
+	#      非对称被丢弃/限速，于是"逐会话测速"实际永远测的是主默认路由那一条。
+	#   2) 用**会话接口 rx_bytes 的增量**计量，并**先暖机 2 秒**丢掉 TCP 慢启动。
+	#   3) **两轮取较大值**：通道是令牌桶整形，单轮可能因远端/链路抖动只跑到一半
+	#      （实测同一会话出现过 92 → 210 Mbps），取小值会把 200M 通道误判成 100M。
+	#      取大值不会反向误判：实测 100M 通道两轮稳定在 92~101 Mbps，从不超过阈值。
+	#   4) 测速 URL 建议用**明文 HTTP**：HTTPS 会让路由器自己（双核 A7）先到瓶颈
+	#      （实测 6 路 HTTPS 只有 ~79 Mbps，同负载明文 HTTP 可达 237 Mbps）。
+	# Pool 保证同一时刻只有这一个测速在跑（speed token）。worker 不落盘，只把自报字节数
+	# 写进小文件（/var/run 是 tmpfs，大文件会把状态文件写坏）。
 	name=$1; result_file=$2; iface=$3
 	: > "$result_file"
 	log_msg "[$name] 高宽测速开始（独占测速令牌）"
@@ -1033,52 +1037,112 @@ run_speed_test_session() {
 	rm -f "$RUN_DIR"/speed.*.bin 2>/dev/null || true
 	case "$SPEED_URL" in *\?*) separator='&' ;; *) separator='?' ;; esac
 	source=$(ip -4 -o addr show dev "$iface" 2>/dev/null | awk 'NR == 1 { split($4, address, "/"); print address[1]; exit }')
-	for stream in 1 2 3 4 5 6; do
-		 (
-			if [ -r "$BIND_LIBRARY" ]; then
-				CAMPUS_REDIAL_DEVICE="$iface" CAMPUS_REDIAL_SOURCE="$source" \
-					LD_PRELOAD="$BIND_LIBRARY" uclient-fetch -q -T "$SPEED_SECONDS" -O - \
-					"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null | wc -c
-			elif command -v curl >/dev/null 2>&1; then
-				case "$iface" in
-					pppoe-*|ppp-*) bind_arg=$source ;;
-					*) bind_arg=$iface ;;
-				esac
-				if [ -n "$bind_arg" ]; then
-					curl -sS -4 --interface "$bind_arg" --max-time "$SPEED_SECONDS" \
-						-o /dev/null -w '%{size_download}' \
-						"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+	# ------------------------------------------------------------------ 会话 mark
+	# mwan3 的 ip rule 形如 `fwmark 0x500/0x3f00 lookup 5`（mark = 表号 << 8）。
+	# 只绑源地址是不够的：内核按**主路由表**选路，而 mwan3 按 **mark** 选表，
+	# 结果会出现"源 IP 属于 A 会话、流量却从 B 会话出去"，非对称包被丢弃/限速，
+	# 于是"每条会话的测速"其实测的是主默认路由那一条。必须先钉 mark。
+	speed_mark=
+	speed_port=
+	if command -v iptables >/dev/null 2>&1; then
+		table=$(ip rule 2>/dev/null | awk -v dev="$iface" '
+			$0 ~ ("iif " dev " ") { for (i = 1; i <= NF; i++) if ($i == "lookup") { print $(i + 1); exit } }')
+		case "$table" in
+			''|*[!0-9]*) speed_mark= ;;
+			*) speed_mark=$(printf '0x%x' $((table * 256))) ;;
+		esac
+		speed_port=$(printf '%s' "$SPEED_URL" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]*:([0-9]+).*#\1#p')
+		if [ -z "$speed_port" ]; then
+			case "$SPEED_URL" in https://*) speed_port=443 ;; *) speed_port=80 ;; esac
+		fi
+	fi
+	mark_rule_del() {
+		[ -n "$speed_mark" ] || return 0
+		while iptables -t mangle -D OUTPUT -p tcp --dport "$speed_port" \
+			-m owner --uid-owner 0 -j MARK --set-xmark "$speed_mark/0x3f00" 2>/dev/null; do :; done
+	}
+	mark_rule_add() {
+		[ -n "$speed_mark" ] || return 0
+		mark_rule_del
+		# 必须 -A 追加：mwan3_hook 是 mangle OUTPUT 的第 1 条，它会清掉已有 mark。
+		iptables -t mangle -A OUTPUT -p tcp --dport "$speed_port" \
+			-m owner --uid-owner 0 -j MARK --set-xmark "$speed_mark/0x3f00" 2>/dev/null || true
+	}
+
+	# ------------------------------------------------------- 单轮：暖机 + 计量
+	# 口径：会话接口 rx_bytes 的增量，**丢弃前 2 秒**（TCP 慢启动）后取 SPEED_SECONDS 秒；
+	# worker 自报字节数只作为交叉校验写进日志（它含慢启动段，天然偏低）。
+	worker_timeout=$((SPEED_SECONDS + 2))
+	run_speed_round() {
+		mark_rule_add
+		pids=
+		: > "$pfile"
+		round_detail=
+		for stream in 1 2 3 4 5 6; do
+			 (
+				if [ -r "$BIND_LIBRARY" ]; then
+					CAMPUS_REDIAL_DEVICE="$iface" CAMPUS_REDIAL_SOURCE="$source" \
+						LD_PRELOAD="$BIND_LIBRARY" uclient-fetch -q -T "$worker_timeout" -O - \
+						"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null | wc -c
+				elif command -v curl >/dev/null 2>&1; then
+					case "$iface" in
+						pppoe-*|ppp-*) bind_arg=$source ;;
+						*) bind_arg=$iface ;;
+					esac
+					if [ -n "$bind_arg" ]; then
+						curl -sS -4 --interface "$bind_arg" --max-time "$worker_timeout" \
+							-o /dev/null -w '%{size_download}' \
+							"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+					else
+						curl -sS -4 --max-time "$worker_timeout" \
+							-o /dev/null -w '%{size_download}' \
+							"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+					fi
 				else
-					curl -sS -4 --max-time "$SPEED_SECONDS" \
-						-o /dev/null -w '%{size_download}' \
-						"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+					printf '0'
 				fi
-			else
-				printf '0'
-			fi
-		) > "$RUN_DIR/speed.$name.$stream.count" 2>/dev/null &
-		pid=$!
-		pids="$pids $pid"
-		printf '%s\n' "$pid" >> "$pfile"
-	done
-	# Let each worker end on its own --max-time so it can still
-	# emit its byte count; the kill below is only a safety net.
-	sleep $((SPEED_SECONDS + 1))
-	for pid in $pids; do kill "$pid" 2>/dev/null || true; done
-	for pid in $pids; do wait "$pid" 2>/dev/null || true; done
-	rm -f "$pfile"
-	total=0
-	for stream in 1 2 3 4 5 6; do
-		bytes=$(cat "$RUN_DIR/speed.$name.$stream.count" 2>/dev/null || echo 0)
-		case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
-		total=$((total + bytes))
-		rm -f "$RUN_DIR/speed.$name.$stream.count"
-	done
-	elapsed=$(( $(date +%s) - start - 1 )); [ "$elapsed" -gt 0 ] || elapsed=1
-	speed=$(awk -v bytes="$total" -v seconds="$elapsed" 'BEGIN { printf "%.2f", bytes * 8 / seconds / 1000000 }' 2>/dev/null || echo 0)
+			) > "$RUN_DIR/speed.$name.$stream.count" 2>/dev/null &
+			pid=$!
+			pids="$pids $pid"
+			printf '%s\n' "$pid" >> "$pfile"
+		done
+		sleep 3                                   # 暖机：丢掉 TCP 慢启动与首次建连
+		base=$(cat "/sys/class/net/$iface/statistics/rx_bytes" 2>/dev/null || echo 0)
+		t0=$(date +%s)
+		sleep "$SPEED_SECONDS"                    # 计量窗口
+		nowb=$(cat "/sys/class/net/$iface/statistics/rx_bytes" 2>/dev/null || echo 0)
+		t1=$(date +%s)
+		# worker 的 --max-time 与窗口对齐（窗口结束即自行退出并报数），kill 只是保险。
+		for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+		for pid in $pids; do wait "$pid" 2>/dev/null || true; done
+		mark_rule_del
+		rm -f "$pfile"
+		total=0
+		for stream in 1 2 3 4 5 6; do
+			bytes=$(cat "$RUN_DIR/speed.$name.$stream.count" 2>/dev/null || echo 0)
+			case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+			total=$((total + bytes))
+			rm -f "$RUN_DIR/speed.$name.$stream.count"
+		done
+		win=$((t1 - t0)); [ "$win" -gt 0 ] || win=1
+		bytes_if=$((nowb - base)); [ "$bytes_if" -gt 0 ] || bytes_if=0
+		round_detail="接口 $((bytes_if / 1048576)) MB/${win}s，worker 自报 $((total / 1048576)) MB/${worker_timeout}s"
+		if [ "$bytes_if" -gt 0 ]; then
+			awk -v bytes="$bytes_if" -v seconds="$win" 'BEGIN { printf "%.2f", bytes * 8 / seconds / 1000000 }'
+		else
+			awk -v bytes="$total" -v seconds="$worker_timeout" 'BEGIN { printf "%.2f", bytes * 8 / seconds / 1000000 }'
+		fi
+	}
+	round1=$(run_speed_round); detail1=$round_detail
+	round2=$(run_speed_round); detail2=$round_detail
+	# 两轮取较大值：单轮可能只跑到一半（实测 92 vs 210），取小值会误杀 200M 通道；
+	# 反向误判的风险很低——实测 100M 通道两轮都在 92~101 Mbps，离阈值 150 很远。
+	speed=$(awk -v a="$round1" -v b="$round2" 'BEGIN { printf "%.2f", (a > b) ? a : b }' 2>/dev/null || echo 0)
+	mark_rule_del
 	printf '%s\n' "$speed" > "$RUN_DIR/speed.$name.value"
 	session_mark "$name" "speed=$speed"
-	log_msg "[$name] 高宽测速完成：$speed Mbps（阈值 $SPEED_THRESHOLD，${SPEED_SECONDS}s 窗口）"
+	log_msg "[$name] 高宽测速完成：$speed Mbps（阈值 $SPEED_THRESHOLD，${SPEED_SECONDS}s 窗口 ×2 取大值；会话 mark=${speed_mark:-无}；总耗时 $(( $(date +%s) - start ))s）"
+	log_msg "[$name]   第1轮 $round1 Mbps（$detail1）；第2轮 $round2 Mbps（$detail2）"
 	write_status
 	if awk -v value="$speed" -v threshold="$SPEED_THRESHOLD" 'BEGIN { exit !(value > threshold) }'; then
 		printf '%s\n' success > "$result_file"

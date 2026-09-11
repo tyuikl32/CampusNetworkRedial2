@@ -124,12 +124,19 @@ const zapretModeNames = {
 
 function zapretRunningBadge(s) {
 	if (!s.installed) return E('span', { 'class': 'label' }, _('未安装'));
-	/* s.redirect = LAN 80/443 是否仍被 DNAT 到 tpws。
+	/* s.redirect = 当前模式下流量是否确实被接管：
+	 *   nfqws → mangle 上有 NFQUEUE 规则；tpws → nat 上有到 127.0.0.127:988 的跳转。
 	 * 旧版后端没有这个字段时按“与 running 一致”处理，避免误报。 */
 	const redirect = (s.redirect === undefined) ? !!s.running : !!s.redirect;
 	if (s.running && redirect) return E('span', { 'class': 'label notice-success' }, _('运行中'));
 	if (s.running) return E('span', { 'class': 'label notice-warning' }, _('运行中（未接管流量）'));
-	if (redirect) return E('span', { 'class': 'label notice-error', 'style': 'color:#c0392b' }, _('异常：跳转残留'));
+	if (redirect) {
+		/* nfqws 的规则带 --queue-bypass，进程没了也不会黑洞；
+		 * tpws 的 nat 跳转残留则会让所有网页 connection refused。 */
+		if (s.mode === 'nfqws')
+			return E('span', { 'class': 'label notice-warning' }, _('已停止（规则残留，不影响上网）'));
+		return E('span', { 'class': 'label notice-error', 'style': 'color:#c0392b' }, _('异常：跳转残留'));
+	}
 	return E('span', { 'class': 'label notice-warning' }, _('已停止（直连）'));
 }
 
@@ -257,21 +264,39 @@ return view.extend({
 					s.enabled ? _('是') : _('否'),
 					redirect ? _('是') : _('否')))
 		]);
-		setContent(this.zapretTrafficNode, [
-			metric(_('DNAT 命中包数'), s.redirect_pkts),
-			metric(_('DNAT 命中流量'), fmtBytes(s.redirect_bytes)),
-			metric(_('名单域名数'), s.hostlist_count)
-		]);
-		/* “停止”必须同时停进程和摘掉 nat 跳转，所以只要两者之一还在就该可用。 */
+		const nfqws = (s.mode === 'nfqws');
+		const hitPkts  = (s.hit_pkts  !== undefined) ? s.hit_pkts  : s.redirect_pkts;
+		const hitBytes = (s.hit_bytes !== undefined) ? s.hit_bytes : s.redirect_bytes;
+		const trafficMetrics = [
+			metric(nfqws ? _('NFQUEUE 命中包数') : _('DNAT 命中包数'), text(hitPkts, '0')),
+			metric(nfqws ? _('NFQUEUE 命中流量') : _('DNAT 命中流量'), fmtBytes(hitBytes)),
+			/* 名单为空 = 匹配所有主机（实测语义），不是“没生效” */
+			s.hostlist_all
+				? metric(_('名单域名数'), _('%s（空 = 全部域名）').format(text(s.hostlist_count, '0')))
+				: metric(_('名单域名数'), text(s.hostlist_count, '0'))
+		];
+		if (nfqws)
+			trafficMetrics.push(metric(_('NFQUEUE 规则数'), text(s.nfqueue_rules, '0')));
+		setContent(this.zapretTrafficNode, trafficMetrics);
+		/* “停止”必须同时停进程和摘掉接管规则，所以只要两者之一还在就该可用。 */
 		if (!s.running && redirect) {
-			setContent(this.zapretHintNode, E('em', { 'style': 'color:#c0392b' },
-				_('异常：tpws 未运行，但 nat 跳转仍在——所有网页会 connection refused（本面板也会打不开）。点“停止”可立刻摘除跳转、恢复直连。')));
+			if (nfqws)
+				setContent(this.zapretHintNode, E('em', { 'style': 'color:#b8860b' },
+					_('nfqws 未运行，但 NFQUEUE 规则还在。规则带 --queue-bypass，不会断网；点“启动”即可恢复。')));
+			else
+				setContent(this.zapretHintNode, E('em', { 'style': 'color:#c0392b' },
+					_('异常：tpws 未运行，但 nat 跳转仍在——所有网页会 connection refused（本面板也会打不开）。点“停止”可立刻摘除跳转、恢复直连。')));
 		} else if (!s.running) {
 			setContent(this.zapretHintNode, E('em', {},
 				_('SNI 分流已停止：流量直连，不受分流影响。')));
 		} else if (!redirect) {
 			setContent(this.zapretHintNode, E('em', { 'style': 'color:#b8860b' },
-				_('tpws 在运行但未接管流量（nat 跳转缺失）。点“重启”可重新接管。')));
+				nfqws
+					? _('nfqws 在运行，但 mangle 里没有 NFQUEUE 规则——流量没有被接管。点“重启”可重新接管。')
+					: _('tpws 在运行但未接管流量（nat 跳转缺失）。点“重启”可重新接管。')));
+		} else if (s.hostlist_all) {
+			setContent(this.zapretHintNode, E('em', {},
+				_('分流已接管 80/443 流量；名单为空时对全部域名生效（每连接只有前几个包进用户态）。')));
 		} else {
 			setContent(this.zapretHintNode, E('span'));
 		}

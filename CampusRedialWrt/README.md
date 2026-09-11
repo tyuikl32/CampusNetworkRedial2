@@ -36,6 +36,7 @@ CampusRedialWrt/
 │
 ├── tools/                           安装、卸载与构建辅助脚本
 │   ├── install-sni-desync.sh        SNI 分流安装（自动探测 nfqws/tpws，支持 --offline=、--mode=、--dry-run）
+│   ├── install-flow-offload.sh      转发快路径（flow offload）+ 首包保护：聚合下行 350 → ~690 Mbps
 │   ├── uninstall-sni-desync.sh      幂等卸载（hostlist 自动备份）
 │   ├── build-macvlan-kmod.sh        内核模块构建入口（转发到 kmod-build/ 的流程）
 │   ├── build-dev-apk.sh             历史 25.12 APK 应急构建（当前 21.02.7 不使用）

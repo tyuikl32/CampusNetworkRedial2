@@ -168,20 +168,63 @@ local function zapret_status()
 		mode      = zapret_mode(),
 		enabled   = fs.access("/etc/rc.d/S21zapret") ~= nil
 	}
-	-- fw3 tpws mode: nat DNAT rule packet/byte counters (iptables -L -v).
-	local line = tostring(sys.exec(
+	-- 流量接管有两种形态，必须按模式分别判定。历史缺陷：这里只查 nat 跳转，
+	-- 于是 nfqws 模式（没有 nat 跳转、靠 mangle NFQUEUE）被永久误报成
+	-- “运行中（未接管流量）”、DNAT 命中恒为 0，点“启动/重启”也看不出变化。
+	--   tpws  : nat PREROUTING/OUTPUT 把 LAN 80/443 DNAT 到 127.0.0.127:988
+	--   nfqws : mangle 把每连接前几个包送进 NFQUEUE（--queue-num 200）
+	local natline = tostring(sys.exec(
 		"iptables -t nat -L PREROUTING -v -n 2>/dev/null | grep -m1 '127.0.0.127:988'"))
-	local pkts = line:match("^%s*(%d+)") or "0"
-	local bytes = line:match("^%s*%d+%s+(%d+)") or "0"
-	result.redirect_pkts  = pkts
-	result.redirect_bytes = bytes
-	-- redirect = LAN 80/443 是否仍被 DNAT 到 tpws。running 与 redirect 不一致
-	-- 就是故障态：running 而 !redirect 说明分流没接上；!running 而 redirect
-	-- 说明跳转残留、所有网页会 connection refused（面板也会打不开）。
-	result.redirect = line:match("127%.0%.0%.127:988") ~= nil
+	result.nat_redirect   = natline:match("127%.0%.0%.127:988") ~= nil
+	result.redirect_pkts  = natline:match("^%s*(%d+)") or "0"
+	result.redirect_bytes = natline:match("^%s*%d+%s+(%d+)") or "0"
+
+	local nf_rules, nf_pkts, nf_bytes = 0, 0, 0
+	do
+		local rules_out = tostring(sys.exec("iptables -t mangle -S 2>/dev/null | grep -c NFQUEUE"))
+		nf_rules = tonumber(rules_out:match("%d+")) or 0
+	end
+	do
+		-- 三条链都要算：出向 POSTROUTING、入向 FORWARD / INPUT
+		local out = tostring(sys.exec(
+			"for c in POSTROUTING FORWARD INPUT; do " ..
+			"iptables -t mangle -L \"$c\" -v -n 2>/dev/null; done"))
+		for l in out:gmatch("[^\r\n]+") do
+			if l:find("NFQUEUE", 1, true) then
+				local p, b = l:match("^%s*(%d+)%s+(%d+)")
+				if p then
+					nf_pkts  = nf_pkts  + (tonumber(p) or 0)
+					nf_bytes = nf_bytes + (tonumber(b) or 0)
+				end
+			end
+		end
+	end
+	result.nfqueue_rules = nf_rules
+	result.nfqueue_pkts  = nf_pkts
+	result.nfqueue_bytes = nf_bytes
+
+	-- 统一口径：redirect = 当前模式下“流量确实被接管”；hit_* = 当前形态的命中量。
+	-- running 与 redirect 不一致就是故障态：running 而 !redirect 说明分流没接上；
+	-- !running 而 redirect 在 tpws 下是跳转残留（所有网页 connection refused，
+	-- 连本面板也打不开），在 nfqws 下只是规则还在（带 --queue-bypass，不会黑洞）。
+	if result.mode == "nfqws" then
+		result.redirect      = nf_rules > 0
+		result.redirect_kind = result.redirect and "nfqueue" or "none"
+		result.hit_pkts      = nf_pkts
+		result.hit_bytes     = nf_bytes
+	else
+		result.redirect      = result.nat_redirect
+		result.redirect_kind = result.redirect and "nat" or "none"
+		result.hit_pkts      = tonumber(result.redirect_pkts) or 0
+		result.hit_bytes     = tonumber(result.redirect_bytes) or 0
+	end
+
 	result.off      = fs.access(ZAPRET_OFF_FLAG) ~= nil
 	local hosts = zapret_hostlist_read() or {}
 	result.hostlist_count = #hosts
+	-- 实测语义：hostlist 文件存在但为空 = 匹配所有主机（对所有域名做 desync）。
+	-- 面板必须把这点说清楚，否则“名单域名数 0”会被读成“分流没生效”。
+	result.hostlist_all = #hosts == 0
 	result.updated_at = os.date("%Y-%m-%d %H:%M:%S")
 	return result
 end

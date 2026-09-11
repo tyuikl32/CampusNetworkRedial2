@@ -72,15 +72,20 @@ endef
 define Package/$(PKG_NAME)/prerm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
-/etc/init.d/campus-redial stop >/dev/null 2>&1 || true
-/etc/init.d/campus-redial disable >/dev/null 2>&1 || true
 
-# Upgrades must preserve app-managed WAN sections and the IPv6 backup.  The
-# cleanup below is only for a real removal; postinst will enable the service
-# again after an upgrade.
+# 升级不打断服务：早期实现无条件 stop + disable，而 postinst 只 enable 不 start，
+# 于是 opkg 升级之后守护进程不会自己起来（表现为“升级完就不拨号了”，直到手动
+# /etc/init.d/campus-redial start）。升级时直接返回，运行中的实例在下次重启或手动
+# restart 时才换到新代码。
 if [ "$${1:-}" = upgrade ]; then
 	exit 0
 fi
+
+/etc/init.d/campus-redial stop >/dev/null 2>&1 || true
+/etc/init.d/campus-redial disable >/dev/null 2>&1 || true
+
+# 以下是真正的“卸载”清理：只动本包标记过的段（wan2..wan24 及其 macvlan / mwan3 段）
+# 与临时 IPv6 委派改动，lan 与主 wan 原样保留。
 
 firewall_state=/etc/campus-redial/firewall-managed-networks
 if [ -r "$${firewall_state}" ] && [ -f /etc/config/firewall ]; then

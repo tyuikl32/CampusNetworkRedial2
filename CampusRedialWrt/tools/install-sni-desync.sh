@@ -357,6 +357,26 @@ install_hotplug() {
 	log "已安装 hotplug 钩子 $HOTPLUG_DST"
 }
 
+maybe_install_flow_offload() {
+	# 转发快路径：不装的话，多拨并发聚合会被路由器 CPU 卡在 ~350 Mbps（实测 cpu1 全程 100%、
+	# softirq ~92%），而链路本身能给到 ~700 Mbps。见 docs/01-项目原理.md §5、docs/05 §3.7。
+	# offload 脚本单独提供，便于以后单独升级/回滚；这里只做“同目录存在就顺手装上”。
+	local here sibling
+	here=$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo .)
+	sibling="$here/install-flow-offload.sh"
+	if [ -f "$sibling" ]; then
+		log "安装转发快路径（flow offload + 80/443 首包保护）..."
+		if [ "$DRY_RUN" = 1 ]; then
+			echo "  + sh $sibling"
+		else
+			sh "$sibling" || warn "flow offload 安装失败，可稍后手工执行 sh $sibling"
+		fi
+	else
+		log "未找到同目录的 install-flow-offload.sh（可选，但强烈建议装）"
+		log "  不装的话，多拨并发聚合通常被 CPU 卡在 ~350 Mbps，见 docs/05-故障排查.md §3.7"
+	fi
+}
+
 start_service() {
 	log "重启 zapret 服务与防火墙..."
 	if [ "$DRY_RUN" = 1 ]; then
@@ -409,6 +429,7 @@ main() {
 	install_firewall_include
 	install_hotplug
 	start_service
+	maybe_install_flow_offload
 
 	log "安装完成（模式: $MODE）。"
 	log "  1) 编辑 hostlist：$ZAPRET_BASE/ipset/zapret-hosts-user.txt（每行一个域名）"

@@ -17,3 +17,8 @@ luci-cookie*.txt
 .DS_Store
 Thumbs.db
 /Properties
+
+# Python 缓存（打包脚本运行时生成）
+__pycache__/
+*.pyc
+
