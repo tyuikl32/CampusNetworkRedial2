@@ -30,8 +30,8 @@ internal sealed class AppOptions
 
     public List<Uri> ProbeUris { get; } =
     [
-        new Uri("https://abvolcapi.douyucdn.cn/"),
-        new Uri("https://apiv2.douyucdn.cn/")
+        new Uri("http://abvolcapi.douyucdn.cn/"),
+        new Uri("http://apiv2.douyucdn.cn/")
     ];
 
     public void SetProbeUris(IEnumerable<Uri> uris)
