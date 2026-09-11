@@ -1371,6 +1371,8 @@ run_pool_task() {
 			record_session_attempt "$sname" 0
 			ifup "$sname" >/dev/null 2>&1 || true
 			wait_for_up_name "$sname" 60 || log_msg "[$sname] 拨号超时"
+			mwan3_restore "$sname"
+			: "[$sname] 拨号超时"
 		fi
 		if session_healthy "$sname"; then
 			session_mark "$sname" "state=up" "dial_state=up" "detection_state=testing" "usable=1" "up=1"
@@ -1715,6 +1717,25 @@ pool_all_exhausted() {
 # 与 /etc/firewall.zapret 的守卫同一口径：有停止标记、或既没自启也没进程时，什么都不做。
 # 关掉：uci set campus-redial.main.zapret_watchdog='0'
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 重拨前"排空"该会话（2026-09-11，修「重拨期间其它设备掉网」）
+# 机理：ifdown 掉一条会话后，mwan3 要等自己的 tracker 连续失败（十几~几十秒）才会把它
+# 判离线并重写策略链；这段窗口里 cr_balanced 仍按概率把**新连接**分配给这条已经断掉的
+# 会话 => 每个设备都有约 1/会话数 的新连接被投进黑洞，观感就是"路由器短暂失去网络"。
+# 修法：重拨前先 mwan3 ifdown <会话>（把它从策略里摘出去，不再分配新连接），
+# 拨号+稳定后再 mwan3 ifup <会话> 放回。
+# **mwan3 ifdown/ifup 是按接口增量的**：只重建策略链与该接口的路由/规则，
+# 不像 mwan3 restart 那样整体重建，因此不会打断其它会话或其它设备（无需断网）。
+# ---------------------------------------------------------------------------
+mwan3_drain() {
+	command -v mwan3 >/dev/null 2>&1 || return 0
+	mwan3 ifdown "$1" >/dev/null 2>&1 || true
+}
+
+mwan3_restore() {
+	command -v mwan3 >/dev/null 2>&1 || return 0
+	mwan3 ifup "$1" >/dev/null 2>&1 || true
+}
 online_wan_count() {
 	ip -4 -o addr show 2>/dev/null | grep -cE '(pppoe-wan|ppp[0-9])'
 }
@@ -1822,13 +1843,17 @@ pool_maintain_once() {
 			i=$((i + 1)); continue
 		}
 		auth_wait || return 1
+		log_msg "[$sname] 排空 mwan3（重拨期间不再分配新连接）"
+		mwan3_drain "$sname"
 		ifdown "$sname" >/dev/null 2>&1 || true
 		wait_seconds "$PAUSE_SECONDS" || return 0
 		record_session_attempt "$sname" 1
 		ifup "$sname" >/dev/null 2>&1 || true
 		session_mark "$sname" "state=dialing" "dial_state=dialing" "detection_state=waiting" "usable=0" "up=0" "verified=0" "terminal=0"
 		write_status
-		wait_for_up_name "$sname" 60 || { session_mark "$sname" "state=down" "dial_state=down" "detection_state=waiting" "usable=0" "up=0"; write_status; i=$((i + 1)); continue; }
+		wait_for_up_name "$sname" 60 || { mwan3_restore "$sname"
+			session_mark "$sname" "state=down" "dial_state=down" "detection_state=waiting" "usable=0" "up=0"; write_status; i=$((i + 1)); continue; }
+		mwan3_restore "$sname"
 		session_mark "$sname" "state=up" "dial_state=up" "detection_state=testing" "usable=1" "up=1"
 		# Let the fresh PPPoE session settle before testing (BRAS/DNS need a
 		# moment right after authentication).
