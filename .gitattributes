@@ -1,0 +1,31 @@
+# 换行符策略：路由器上跑的是 busybox sh，CRLF 会让脚本直接语法报错；
+# 而且 release 包是直接从工作树打的，所以这里强制 LF。
+# （此前踩过：docs/05 与 .gitignore 曾被 Windows 编辑器写成 CRLF。）
+*.sh            text eol=lf
+*.md            text eol=lf
+*.py            text eol=lf
+*.js            text eol=lf
+*.json          text eol=lf
+*.lua           text eol=lf
+*.c             text eol=lf
+*.h             text eol=lf
+*.cfg           text eol=lf
+*.conf          text eol=lf
+*.txt           text eol=lf
+Makefile        text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+# 无扩展名的设备端脚本
+campus-rediald            text eol=lf
+campus-redialctl          text eol=lf
+campus-redial-mwan3       text eol=lf
+campus-redial-mwan3route  text eol=lf
+campus_redial             text eol=lf
+# 二进制/压缩件不要做任何转换
+*.ipk           binary
+*.apk           binary
+*.tar.gz        binary
+*.gz            binary
+*.ko            binary
+*.png           binary
+*.ico           binary
