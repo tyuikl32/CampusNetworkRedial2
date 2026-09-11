@@ -15,6 +15,8 @@ config campus_redial 'main'
 	option bandwidth_threshold_mbps '150'
 	option timeout_seconds '4'
 	option probe_count '3'
+	# SNI 分流规则守护：每次巡检校核 NFQUEUE 规则数，落后于在线会话数×4 就重装（0=关闭）
+	option zapret_watchdog '1'
 	option confirm_interval_seconds '12'
 	option third_interval_seconds '30'
 	option pause_seconds '2'

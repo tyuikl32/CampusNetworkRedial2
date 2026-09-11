@@ -1706,7 +1706,46 @@ pool_all_exhausted() {
 	return 0
 }
 
+# ---------------------------------------------------------------------------
+# SNI 分流规则守护（2026-09-11）
+# 起因（实测）：zapret 的接管规则由 /etc/hotplug.d/iface/90-zapret 在 WAN 接口 up/down 时
+# 重载；池子重拨时会话反复 down/up，若**最后一次事件是 down**，规则会被摘掉且再没人补 ——
+# 现场出现过「5 条会话都在、nfqws 在跑、NFQUEUE 规则 0 条」，SNI 分流静默失效。
+# 这里在每次巡检里校核规则数，落后于「在线会话数 × 4」就重装一次。
+# 与 /etc/firewall.zapret 的守卫同一口径：有停止标记、或既没自启也没进程时，什么都不做。
+# 关掉：uci set campus-redial.main.zapret_watchdog='0'
+# ---------------------------------------------------------------------------
+online_wan_count() {
+	ip -4 -o addr show 2>/dev/null | grep -cE '(pppoe-wan|ppp[0-9])'
+}
+
+zapret_rule_count() {
+	iptables -t mangle -S 2>/dev/null | grep -c NFQUEUE
+}
+
+ensure_zapret_rules() {
+	case "$(uci_get zapret_watchdog)" in
+		0|off|false|no) return 0 ;;
+	esac
+	[ -d /opt/zapret ] || return 0
+	[ -e /var/run/zapret.off ] && return 0
+	if [ ! -e /etc/rc.d/S21zapret ] && ! pidof nfqws >/dev/null 2>&1 && ! pidof tpws >/dev/null 2>&1; then
+		return 0
+	fi
+	online=$(online_wan_count)
+	[ "$online" -gt 0 ] || return 0
+	want=$((online * 4))
+	have=$(zapret_rule_count)
+	[ "$have" -ge "$want" ] && return 0
+	log_msg "SNI 分流规则缺失：期望 $want 条（在线会话 $online × 4），实际 $have 条，重装中"
+	/etc/init.d/zapret stop_fw >/dev/null 2>&1
+	sleep 1
+	/etc/init.d/zapret start_fw >/dev/null 2>&1
+	log_msg "SNI 分流规则重装完成：$have -> $(zapret_rule_count) 条"
+}
 pool_maintain_once() {
+	# 先补 SNI 分流规则（池子重拨会把它们摘掉，见 ensure_zapret_rules）
+	ensure_zapret_rules
 	# One maintenance sweep over the whole pool. Repair-only: sessions that
 	# verified stay untouched; a dropped session gets dialed (throttled) and
 	# re-tested once, with the global speed token and busy-suspend honored.
