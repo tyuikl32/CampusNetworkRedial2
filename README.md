@@ -100,7 +100,8 @@ dotnet run --project .\CampusNetworkRedial.csproj -- -200MbpsMode --dial-name "�
 | LuCI 应用（单会话） | 21.02.7 实机运行中 | 仓库**未附**已验收的 21.02.7 成品包，需按文档自行构建 |
 | 多拨连接池 | 实机运行中（4~5 路） | 依赖 `kmod-macvlan`；认证间隔需 60 秒；BRAS 侧对同一账号的并发会话数有限制 |
 | mwan3 按连接分流 | 实机运行中 | 每接口路由表需要默认路由来源，否则接口被判 `error (16)` 而完全不分流（见故障排查） |
-| SNI 分流（nfqws） | 实机运行中 | 转发路径 16 路明文 HTTP 实测 312~315 Mbps（tpws 为 173~180，完全不经手 355） |
+| SNI 分流（nfqws） | 实机运行中 | 转发路径 16 路明文 HTTP 实测 312~315 Mbps（tpws 为 173~180，完全不经手 355；**均为未开转发快路径时**） |
+| 转发快路径（flow offload） | 实机运行中 | **决定聚合上限的关键**：开启后 10/20/40 流 = 621~696 / 688~707 / 717 Mbps，CPU 峰值 99.5% → ~70%，且 SNI 混淆照常生效；未开则被 CPU 卡在 ~350 Mbps（见 `docs/01` §5、`docs/05` §3.7） |
 | SNI 分流（tpws） | 可用（回退） | 只需 `nat` 表，几乎所有固件都能跑；代价是下行吞吐被用户态代理削半 |
 | 自编内核模块 | 实机运行中 | macvlan / xt_statistic / nfnetlink_queue / xt_NFQUEUE；详见 03 与 reference |
 
