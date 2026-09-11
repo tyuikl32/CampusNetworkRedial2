@@ -10,7 +10,7 @@ Add-Type -AssemblyName System.Net.Http
 
 # Detection uses Douyu's API hosts as a canary: good exits reach them quickly,
 # bad exits throttle them until the request times out.
-$uris = @('http://abvolcapi.douyucdn.cn/', 'http://apiv2.douyucdn.cn/')
+$uris = @('https://abvolcapi.douyucdn.cn/', 'https://apiv2.douyucdn.cn/')
 
 $results = foreach ($i in 1..$Count) {
     $uri = $uris[($i - 1) % $uris.Count]

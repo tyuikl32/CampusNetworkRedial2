@@ -1064,9 +1064,9 @@ run_speed_test_session() {
 	#      mwan3 按 mark 选表 ⇒ "源 IP 属于 A 会话、流量却从 B 会话出去"，
 	#      非对称被丢弃/限速，于是"逐会话测速"实际永远测的是主默认路由那一条。
 	#   2) 用**会话接口 rx_bytes 的增量**计量，并**先暖机 2 秒**丢掉 TCP 慢启动。
-	#   3) **两轮取较大值**：通道是令牌桶整形，单轮可能因远端/链路抖动只跑到一半
+	#   3) **只测一轮**（2026-09-11 按用户要求）：窗口 6 s + 暖机 3 s，读数即判据。
 	#      （实测同一会话出现过 92 → 210 Mbps），取小值会把 200M 通道误判成 100M。
-	#      取大值不会反向误判：实测 100M 通道两轮稳定在 92~101 Mbps，从不超过阈值。
+	#      历史上曾两轮取大值以对冲抖动；现在以「一次测量」为准，与面板/浏览器看到的一致。
 	#   4) 测速 URL 建议用**明文 HTTP**：HTTPS 会让路由器自己（双核 A7）先到瓶颈
 	#      （实测 6 路 HTTPS 只有 ~79 Mbps，同负载明文 HTTP 可达 237 Mbps）。
 	# Pool 保证同一时刻只有这一个测速在跑（speed token）。worker 不落盘，只把自报字节数
@@ -1178,16 +1178,15 @@ run_speed_test_session() {
 			awk -v bytes="$total" -v seconds="$worker_timeout" 'BEGIN { printf "%.2f", bytes * 8 / seconds / 1000000 }'
 		fi
 	}
-	round1=$(run_speed_round); detail1=$round_detail
-	round2=$(run_speed_round); detail2=$round_detail
-	# 两轮取较大值：单轮可能只跑到一半（实测 92 vs 210），取小值会误杀 200M 通道；
-	# 反向误判的风险很低——实测 100M 通道两轮都在 92~101 Mbps，离阈值 150 很远。
-	speed=$(awk -v a="$round1" -v b="$round2" 'BEGIN { printf "%.2f", (a > b) ? a : b }' 2>/dev/null || echo 0)
+	# 只测一轮（2026-09-11 按用户要求）：窗口是 6 秒 + 3 秒暖机，读数就是这一轮的结果。
+	# 历史上曾「两轮取较大值」，用于对冲通道令牌桶整形导致的单轮只跑到一半；
+	# 现在明确只要一次测量——省时间，且判据与人类在面板/浏览器上看到的一次测速一致。
+	speed=$(run_speed_round); detail1=$round_detail
 	mark_rule_del
 	printf '%s\n' "$speed" > "$RUN_DIR/speed.$name.value"
 	session_mark "$name" "speed=$speed"
-	log_msg "[$name] 高宽测速完成：$speed Mbps（阈值 $SPEED_THRESHOLD，${SPEED_SECONDS}s 窗口 ×2 取大值；会话 mark=${speed_mark:-无}；总耗时 $(( $(date +%s) - start ))s）"
-	log_msg "[$name]   第1轮 $round1 Mbps（$detail1）；第2轮 $round2 Mbps（$detail2）"
+	log_msg "[$name] 高宽测速完成：$speed Mbps（阈值 $SPEED_THRESHOLD，${SPEED_SECONDS}s 窗口 ×1 次；会话 mark=${speed_mark:-无}；总耗时 $(( $(date +%s) - start ))s）"
+	log_msg "[$name]   本轮 $speed Mbps（$detail1）"
 	write_status
 	if awk -v value="$speed" -v threshold="$SPEED_THRESHOLD" 'BEGIN { exit !(value > threshold) }'; then
 		printf '%s\n' success > "$result_file"

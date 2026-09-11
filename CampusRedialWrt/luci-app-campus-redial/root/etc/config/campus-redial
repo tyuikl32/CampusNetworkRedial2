@@ -20,8 +20,8 @@ config campus_redial 'main'
 	option pause_seconds '2'
 	option settle_seconds '10'
 	option max_attempts '99'
-	list probe_uri 'http://abvolcapi.douyucdn.cn/'
-	list probe_uri 'http://apiv2.douyucdn.cn/'
+	list probe_uri 'https://abvolcapi.douyucdn.cn/'
+	list probe_uri 'https://apiv2.douyucdn.cn/'
 
 # Optional multi-account pool entries. When at least one enabled account is
 # filled, the sum of max_connections becomes the pool size and the legacy
