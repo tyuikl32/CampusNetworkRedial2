@@ -148,4 +148,17 @@ OpenWrt 侧代码从仓库根迁到 `CampusRedialWrt/`，文档统一到 `docs/`
 
 ## 许可
 
-见仓库许可证文件（如无，请以原始项目 [Introduce183/campus-network-redial](https://github.com/Introduce183/campus-network-redial) 的许可为准）。
+本项目以 **GNU General Public License v2.0** 发布，全文见仓库根目录的 [LICENSE](LICENSE)。
+
+第三方组件与它们的许可：
+
+| 组件 | 位置 | 许可 |
+| --- | --- | --- |
+| LuCI 应用与脚本（本项目主要代码） | `CampusRedialWrt/` | GPL-2.0（本仓库） |
+| **zapret**（`nfqws` / `tpws`，SNI 分流引擎） | `CampusRedialWrt/tools/zapret-embedded.tar.gz` | 上游 GPL-2.0 发行包，未做修改 |
+| 自编内核模块（macvlan / xt_statistic / NFQUEUE） | `CampusRedialWrt/kmod-build/out-*/` | 由设备固件自身的厂商内核源码（Qualcomm QSDK，GPL-2.0）构建 |
+
+Windows 侧的 C# / PowerShell 代码与 OpenWrt 侧同属本仓库，采用同一许可。
+
+> 注：历史的构建产物目录 `CampusRedialWrt/dist/`（25.12 的历史 `.apk`、早期源码归档）**不入库**，
+> 现由 release 附件提供；其中那份 `std-package-source.tar` 是**旧的 25.12/ucode 版本**，不要再用它构建。

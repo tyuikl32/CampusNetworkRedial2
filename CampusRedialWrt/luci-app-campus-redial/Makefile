@@ -3,6 +3,8 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=luci-app-campus-redial
 PKG_VERSION:=1.0.0
 PKG_RELEASE:=1
+# 许可全文在仓库根的 LICENSE（SDK 构建时包目录会被单独复制，所以这里不引用文件路径）
+PKG_LICENSE:=GPL-2.0
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -45,6 +47,9 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_BIN) ./root/usr/sbin/campus-rediald $(1)/usr/sbin/campus-rediald
 	$(INSTALL_BIN) ./root/usr/sbin/campus-redialctl $(1)/usr/sbin/campus-redialctl
 	$(INSTALL_BIN) ./root/usr/sbin/campus-redial-mwan3 $(1)/usr/sbin/campus-redial-mwan3
+	# 守护进程用 `[ -x ... ]` 调它把每条会话的默认路由注入 mwan3 自己的路由表；
+	# 漏装时不会报错，但 mwan3 会把次要会话判成 error (16) 并静默丢弃分流。
+	$(INSTALL_BIN) ./root/usr/sbin/campus-redial-mwan3route $(1)/usr/sbin/campus-redial-mwan3route
 	$(INSTALL_DIR) $(1)/usr/lib
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/campus-redial-bind.so $(1)/usr/lib/campus-redial-bind.so
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d $(1)/usr/share/rpcd/acl.d $(1)/usr/libexec/rpcd

@@ -1,2 +1,19 @@
-/.vs
-/CampusRedialWrt/dist
+# 构建产物（Windows / .NET）
+/bin/
+/obj/
+*.user
+*.suo
+
+# 组件内的构建产物目录（历史包与源码归档不入库，改由 release 附件提供）
+/CampusRedialWrt/dist/
+
+# 本地凭据 / 会话残留 —— 绝不入库
+.crpass
+luci-cookie*.txt
+*.cookies
+
+# 编辑器
+/.vs/
+.DS_Store
+Thumbs.db
+/Properties
