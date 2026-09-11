@@ -89,6 +89,22 @@ wait_seconds() {
 	return 0
 }
 
+# 槽位 → netifd 接口名（2026-09-11）。
+# 1..5 沿用 wan / wan2..wan5（与既有安装兼容，不能改）；
+# ≥6 改用 crpool6、crpool7…：固件自带 network.wan6（IPv6 WAN）是**外来 section**，
+# 守卫按设计拒绝覆盖 —— 实测报错「network.wan6 已存在且不属于本程序，拒绝覆盖」，
+# 于是池子到第 6 条就建不出来。偏移后槽位 6 → wan7，与已装设备的命名一致。
+slot_iface_name() {
+	case "$1" in
+		1) printf '%s' "$WAN_INTERFACE" ;;
+		2|3|4|5) printf 'wan%s' "$1" ;;
+		# ≥6 起偏移 +1：槽位 6 → wan7、7 → wan8…
+		# 因为固件自带 network.wan6（IPv6 WAN）是外来 section，守卫会拒绝覆盖
+		# （实测报错「network.wan6 已存在且不属于本程序」）。偏移后与已装设备的
+		# wan7 命名一致，不产生迁移。
+		*) printf 'wan%s' "$(($1 + 1))" ;;
+	esac
+}
 uci_get() {
 	uci -q get "campus-redial.main.$1" 2>/dev/null || true
 }
@@ -204,7 +220,7 @@ load_accounts() {
 			[ "$session_index" -le "$MAX_POOL_SESSIONS" ] || {
 				LAST_ERROR="账号连接配额总和不能超过 $MAX_POOL_SESSIONS"; return 1;
 			}
-			[ "$session_index" -eq 1 ] && session_name=$WAN_INTERFACE || session_name="wan$session_index"
+			session_name=$(slot_iface_name "$session_index")
 			printf '%s|%s\n' "$session_name" "$account_id" >> "$ACCOUNT_MAP"
 			i=$((i + 1))
 		done
@@ -227,7 +243,7 @@ load_accounts() {
 	printf '%s|legacy\n' "$WAN_INTERFACE" >> "$ACCOUNT_MAP"
 	i=2
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		printf 'wan%s|legacy\n' "$i" >> "$ACCOUNT_MAP"
+		printf '%s|legacy\n' "$(slot_iface_name "$i")" >> "$ACCOUNT_MAP"
 		i=$((i + 1))
 	done
 	printf '%s' "$PPPOE_USERNAME" > "$(account_file username legacy)"
@@ -414,6 +430,28 @@ session_traffic() {
 	printf '%s|%s|%s|%s|%s' "$rx" "$tx" "$rx_rate" "$tx_rate" "$connections"
 }
 
+# 固定节奏刷新各会话的原始流量采样（实时速率 = 与上一次采样的差值 ÷ 间隔）。
+# 起因：速率原先只在 write_status 时采样，而 write_status 由状态变化驱动（可能间隔几十秒），
+# 于是"单连接跑 5 秒 200 Mbps"在面板上只显示 ~30–70 Mbps —— 那是几十秒的平均值，不是瞬时速率。
+# 现在主循环每 3 秒刷一次采样、每 5 秒刷一次 status.json，面板读到的就是 ~3 秒均值。
+sample_traffic_all() {
+	sample_slot=1
+	while [ "$sample_slot" -le "$POOL_SIZE" ]; do
+		sample_name=$(slot_iface_name "$sample_slot")
+		sample_dev=$(session_get "$sample_name" dev)
+		if [ -n "$sample_dev" ] && [ -r "/sys/class/net/$sample_dev/statistics/rx_bytes" ]; then
+			sample_rx=$(cat "/sys/class/net/$sample_dev/statistics/rx_bytes" 2>/dev/null || echo 0)
+			sample_tx=$(cat "/sys/class/net/$sample_dev/statistics/tx_bytes" 2>/dev/null || echo 0)
+			case "$sample_rx" in ''|*[!0-9]*) sample_rx=0 ;; esac
+			case "$sample_tx" in ''|*[!0-9]*) sample_tx=0 ;; esac
+			sample_file=$(atomic_tmp "$RUN_DIR/traffic.$sample_name")
+			printf '%s|%s|%s\n' "$(date +%s)" "$sample_rx" "$sample_tx" > "$sample_file" && \
+				mv -f "$sample_file" "$RUN_DIR/traffic.$sample_name"
+			rm -f "$sample_file"
+		fi
+		sample_slot=$((sample_slot + 1))
+	done
+}
 write_status() {
 	# The run directory is runtime state and may be removed by an upgrade or a
 	# manual cleanup while a worker is still alive. Recreate it before every
@@ -441,13 +479,19 @@ write_status() {
 				session."$WAN_INTERFACE"|session.wan[2-9]|session.wan1[0-9]|session.wan2[0-4]) ;;
 				*) continue ;;
 			esac
-			if [ "$base" = "session.$WAN_INTERFACE" ]; then
-				status_num=1
-			else
-				status_num=$(printf '%s' "$base" | sed 's/^session\.wan//')
-				case "$status_num" in ''|*[!0-9]*) continue ;; esac
-			fi
-			[ "$status_num" -le "$POOL_SIZE" ] || continue
+			# 槽位号**不能从名字里猜**：槽位 6 的接口叫 wan7（偏移 +1 避开固件自带的 wan6），
+			# 旧实现按 session.wan7 取数字 7 去比 POOL_SIZE(6)，于是这条会话永远不出现在列表里。
+			status_name=${base#session.}
+			status_num=
+			pool_slot=1
+			while [ "$pool_slot" -le "$POOL_SIZE" ]; do
+				if [ "$(slot_iface_name "$pool_slot")" = "$status_name" ]; then
+					status_num=$pool_slot
+					break
+				fi
+				pool_slot=$((pool_slot + 1))
+			done
+			[ -n "$status_num" ] || continue
 			status_sname=$(session_get "$(printf '%s' "$base" | sed 's/session\.//')" name)
 			[ -n "$status_sname" ] || status_sname=$(basename "$sf" | sed 's/session\.//')
 			status_state=$(session_get "$status_sname" state)
@@ -582,7 +626,7 @@ sync_firewall_pool() {
 	: > "$managed"
 	i=1
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		[ "$i" -eq 1 ] && fw_name=$WAN_INTERFACE || fw_name="wan$i"
+		fw_name=$(slot_iface_name "$i")
 		printf '%s\n' "$fw_name" >> "$desired"
 		i=$((i + 1))
 	done
@@ -671,6 +715,8 @@ session_busy() {
 #   uclient-fetch ⇒ wget 语义，4xx/5xx 退出码 8；**且会跟随重定向**，
 #                   所以"跟到下一跳才失败"要靠 curl 复核才能与"真连不上"区分开
 FETCH_HTTP_ERROR_RC=8
+# zapret 规则守护的状态文件（记录上次重装后的数量与时间，用于自适应退避）
+ZAPRET_RULES_STATE="$RUN_DIR/zapret-rules.state"
 
 bound_fetch() {
 	iface=$1; shift
@@ -944,7 +990,8 @@ assign_session_accounts() {
 	# LuCI table retain the association without exposing credentials.
 	i=1
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		sname=$(slot_iface_name "$i")
+		ensure_zapret_rules
 		session_init "$sname"
 		account_id=$(account_map_id "$sname")
 		[ -n "$account_id" ] || account_id=unassigned
@@ -1117,7 +1164,7 @@ run_speed_test_session() {
 	# ------------------------------------------------------- 单轮：暖机 + 计量
 	# 口径：会话接口 rx_bytes 的增量，**丢弃前 2 秒**（TCP 慢启动）后取 SPEED_SECONDS 秒；
 	# worker 自报字节数只作为交叉校验写进日志（它含慢启动段，天然偏低）。
-	worker_timeout=$((SPEED_SECONDS + 2))
+	worker_timeout=$((SPEED_SECONDS + 6))	# 暖机 3s + 计量窗口 + 余量：worker 必须活过整个窗口
 	run_speed_round() {
 		mark_rule_add
 		pids=
@@ -1125,27 +1172,34 @@ run_speed_test_session() {
 		round_detail=
 		for stream in 1 2 3 4 5 6; do
 			 (
-				if [ -r "$BIND_LIBRARY" ]; then
-					CAMPUS_REDIAL_DEVICE="$iface" CAMPUS_REDIAL_SOURCE="$source" \
-						LD_PRELOAD="$BIND_LIBRARY" uclient-fetch -q -T "$worker_timeout" -O - \
-						"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null | wc -c
-				elif command -v curl >/dev/null 2>&1; then
-					case "$iface" in
-						pppoe-*|ppp-*) bind_arg=$source ;;
-						*) bind_arg=$iface ;;
-					esac
-					if [ -n "$bind_arg" ]; then
-						curl -sS -4 --interface "$bind_arg" --max-time "$worker_timeout" \
-							-o /dev/null -w '%{size_download}' \
-							"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+				case "$iface" in
+					pppoe-*|ppp-*) bind_arg=$source ;;
+					*) bind_arg=$iface ;;
+				esac
+				# 循环取数直到本 worker 截止：单次取完 100MB 就停会让窗口后半段没流量，
+				# 通道越快越早取完、读数越低（实测 200Mbps 通道只读出 ~70）。改为连续取 20MB 分片。
+				deadline=$(( $(date +%s) + worker_timeout ))
+				total_bytes=0
+				fetch=0
+				while [ "$(date +%s)" -lt "$deadline" ]; do
+					fetch=$((fetch + 1))
+					url="${SPEED_URL}${separator}r=$stream&ckSize=20&cr=$fetch"
+					if [ -r "$BIND_LIBRARY" ]; then
+						got=$(CAMPUS_REDIAL_DEVICE="$iface" CAMPUS_REDIAL_SOURCE="$source" LD_PRELOAD="$BIND_LIBRARY" uclient-fetch -q -T 5 -O - "$url" 2>/dev/null | wc -c)
+					elif command -v curl >/dev/null 2>&1; then
+						if [ -n "$bind_arg" ]; then
+							got=$(curl -sS -4 --interface "$bind_arg" --max-time 5 -o /dev/null -w '%{size_download}' "$url" 2>/dev/null)
+						else
+							got=$(curl -sS -4 --max-time 5 -o /dev/null -w '%{size_download}' "$url" 2>/dev/null)
+						fi
 					else
-						curl -sS -4 --max-time "$worker_timeout" \
-							-o /dev/null -w '%{size_download}' \
-							"${SPEED_URL}${separator}r=$stream&ckSize=100" 2>/dev/null
+						got=0
 					fi
-				else
-					printf '0'
-				fi
+					case "$got" in ''|*[!0-9]*) got=0 ;; esac
+					total_bytes=$((total_bytes + got))
+					[ "$got" -gt 0 ] || break
+					done
+				printf '%s' "$total_bytes"
 			) > "$RUN_DIR/speed.$name.$stream.count" 2>/dev/null &
 			pid=$!
 			pids="$pids $pid"
@@ -1300,7 +1354,8 @@ run_pool_task() {
 	# Initialize per-session state files (preserve counters across restarts).
 	i=1
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		sname=$(slot_iface_name "$i")
+		ensure_zapret_rules
 		session_init "$sname"
 		account_id=$(account_map_id "$sname"); [ -n "$account_id" ] || account_id=unassigned
 		account_label=$(account_map_label "$sname")
@@ -1319,7 +1374,7 @@ run_pool_task() {
 	i=1
 	while [ "$i" -le "$POOL_SIZE" ]; do
 		[ "$STOP_REQUESTED" -eq 0 ] || break
-		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		sname=$(slot_iface_name "$i")
 		log_msg "池调度：i=$i wan=$WAN_INTERFACE session=$sname cold=$cold_start"
 		if ! load_session_credentials "$sname"; then
 			log_msg "[$sname] 账号配置失败：$LAST_ERROR"
@@ -1384,6 +1439,7 @@ run_pool_task() {
 			elif run_session_lifecycle "$sname"; then
 				session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "verified=1" "up=1" "error="
 				record_session_result "$sname" success
+			mwan3_restore "$sname"
 				log_msg "[$sname] 检测通过，计入成功连接"
 			else
 				session_mark "$sname" "state=failed" "dial_state=up" "detection_state=failed" "usable=1" "verified=0" "up=1" "error=检测未通过"
@@ -1561,7 +1617,7 @@ cleanup_mwan_interface() {
 disable_unused_pool_sessions() {
 	i=$((POOL_SIZE + 1))
 	while [ "$i" -le "$MAX_POOL_SESSIONS" ]; do
-		name="wan$i"
+		name=$(slot_iface_name "$i")
 		managed=$(uci -q get "network.$name.campus_redial_managed" 2>/dev/null || true)
 		if [ "$managed" = 1 ]; then
 			ifdown "$name" >/dev/null 2>&1 || true
@@ -1582,7 +1638,7 @@ disable_unused_pool_sessions() {
 		fi
 		i=$((POOL_SIZE + 1))
 	while [ "$i" -le "$MAX_POOL_SESSIONS" ]; do
-			cleanup_mwan_interface "wan$i"
+			cleanup_mwan_interface "$(slot_iface_name "$i")"
 			i=$((i + 1))
 		done
 		if [ "$POOL_SIZE" -le 1 ]; then
@@ -1604,7 +1660,7 @@ configure_mwan3_pool() {
 	command -v uci >/dev/null 2>&1 || return 0
 	i=1; members=
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		[ "$i" -eq 1 ] && s=$WAN_INTERFACE || s="wan$i"
+		s=$(slot_iface_name "$i")
 		isec="$s"
 		msec="cr_${s}_member"
 		isec_type=$(uci -q get "mwan3.$isec" 2>/dev/null || true)
@@ -1669,7 +1725,7 @@ pool_success_count() {
 	# Count sessions whose latest test cycle passed (verified=1).
 	i=1; n=0
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		[ "$i" -eq 1 ] && s=$WAN_INTERFACE || s="wan$i"
+		s=$(slot_iface_name "$i")
 		[ "$(session_get "$s" verified)" = 1 ] && n=$((n + 1))
 		i=$((i + 1))
 	done
@@ -1681,7 +1737,7 @@ pool_connected_count() {
 	# optional health/speed checks pass. Keep this separate from verified count.
 	i=1; n=0
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		[ "$i" -eq 1 ] && s=$WAN_INTERFACE || s="wan$i"
+		s=$(slot_iface_name "$i")
 		if [ "$(session_get "$s" usable)" = 1 ] || [ "$(session_get "$s" up)" = 1 ]; then
 			n=$((n + 1))
 		fi
@@ -1696,7 +1752,7 @@ pool_all_exhausted() {
 	# is in one of those terminal states; successful peers may keep running.
 	i=1
 	while [ "$i" -le "$POOL_SIZE" ]; do
-		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		sname=$(slot_iface_name "$i")
 		terminal=$(session_get "$sname" terminal)
 		dials=$(session_get "$sname" dial_attempts)
 		case "$dials" in ''|*[!0-9]*) dials=0 ;; esac
@@ -1744,6 +1800,78 @@ zapret_rule_count() {
 	iptables -t mangle -S 2>/dev/null | grep -c NFQUEUE
 }
 
+# 在线 PPPoE 设备列表（直接看内核里哪些会话拿着地址，不依赖 zapret 的发现机制）
+pppoe_devices_list() {
+  ip -4 -o addr show 2>/dev/null | awk '/pppoe-wan|ppp[0-9]/ { print $2 }' | sort -u
+}
+
+# 从正在运行的 nfqws 命令行里取队列号与 fwmark（取不到就用 zapret 的默认值）
+zapret_queue_num() {
+  nfq_pid=$(pidof nfqws 2>/dev/null | awk '{ print $1 }')
+  qnum=$(sed -n 's/.*--qnum=\([0-9][0-9]*\).*/\1/p' "/proc/$nfq_pid/cmdline" 2>/dev/null | head -1)
+  [ -n "$qnum" ] || qnum=200
+  printf '%s' "$qnum"
+}
+
+zapret_fwmark() {
+  nfq_pid=$(pidof nfqws 2>/dev/null | awk '{ print $1 }')
+  fwm=$(tr '\0' ' ' < "/proc/$nfq_pid/cmdline" 2>/dev/null | sed -n 's/.*--dpi-desync-fwmark=\(0x[0-9a-fA-F]*\).*/\1/p' | head -1)
+  [ -n "$fwm" ] || fwm=0x40000000
+  printf '%s' "$fwm"
+}
+
+# 给"在线但 zapret 没覆盖"的会话补插 4 条同形状规则。
+# 为什么需要：zapret 只给它自己发现到的 WAN 装规则（读 netifd 的 ubus 主表默认路由），
+# 而多拨会话的默认路由是注入到 mwan3 各自路由表里的，于是会被漏掉 —— 实测 6 条会话只覆盖
+# 5 台设备，被漏掉那条会话上 SNI desync 完全不生效（校园网按域名限速照旧）。
+# 幂等：先看该设备有没有规则；每条都先 -C 探测再 -A，重复调用不会堆规则。
+zapret_fill_missing_devices() {
+  zapret_qnum=$(zapret_queue_num)
+  zapret_mark=$(zapret_fwmark)
+  for zdev in $(pppoe_devices_list); do
+    zcovered=$(iptables -t mangle -S 2>/dev/null | grep -c -- "-o $zdev ")
+    [ "$zcovered" -ge 2 ] && continue
+    # 上行：TCP 80/443（每连接前 6 包）
+    iptables -t mangle -C POSTROUTING -o "$zdev" -p tcp -m mark ! --mark "$zapret_mark/$zapret_mark" \
+      -m multiport --dports 80,443 -m connbytes --connbytes 1:6 --connbytes-mode packets \
+      --connbytes-dir original -m set ! --match-set nozapret dst \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || \
+    iptables -t mangle -A POSTROUTING -o "$zdev" -p tcp -m mark ! --mark "$zapret_mark/$zapret_mark" \
+      -m multiport --dports 80,443 -m connbytes --connbytes 1:6 --connbytes-mode packets \
+      --connbytes-dir original -m set ! --match-set nozapret dst \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || true
+    # 上行：UDP 443（QUIC）
+    iptables -t mangle -C POSTROUTING -o "$zdev" -p udp -m mark ! --mark "$zapret_mark/$zapret_mark" \
+      -m multiport --dports 443 -m connbytes --connbytes 1:6 --connbytes-mode packets \
+      --connbytes-dir original -m set ! --match-set nozapret dst \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || \
+    iptables -t mangle -A POSTROUTING -o "$zdev" -p udp -m mark ! --mark "$zapret_mark/$zapret_mark" \
+      -m multiport --dports 443 -m connbytes --connbytes 1:6 --connbytes-mode packets \
+      --connbytes-dir original -m set ! --match-set nozapret dst \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || true
+    # 下行：FORWARD 回包前 3 个（nfqws 部分 desync 模式需要看到响应）
+    iptables -t mangle -C FORWARD -i "$zdev" -p tcp -m multiport --sports 80,443 \
+      -m connbytes --connbytes 1:3 --connbytes-mode packets --connbytes-dir reply \
+      -m set ! --match-set nozapret src \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || \
+    iptables -t mangle -A FORWARD -i "$zdev" -p tcp -m multiport --sports 80,443 \
+      -m connbytes --connbytes 1:3 --connbytes-mode packets --connbytes-dir reply \
+      -m set ! --match-set nozapret src \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || true
+    # 下行：INPUT 回包（路由器自身经该会话的请求）
+    iptables -t mangle -C INPUT -i "$zdev" -p tcp -m multiport --sports 80,443 \
+      -m connbytes --connbytes 1:3 --connbytes-mode packets --connbytes-dir reply \
+      -m set ! --match-set nozapret src \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || \
+    iptables -t mangle -A INPUT -i "$zdev" -p tcp -m multiport --sports 80,443 \
+      -m connbytes --connbytes 1:3 --connbytes-mode packets --connbytes-dir reply \
+      -m set ! --match-set nozapret src \
+      -j NFQUEUE --queue-num "$zapret_qnum" --queue-bypass 2>/dev/null || true
+    log_msg "zapret-watchdog: filled NFQUEUE rules for $zdev (queue $zapret_qnum mark $zapret_mark)"
+  done
+  return 0
+}
+
 ensure_zapret_rules() {
 	case "$(uci_get zapret_watchdog)" in
 		0|off|false|no) return 0 ;;
@@ -1753,16 +1881,38 @@ ensure_zapret_rules() {
 	if [ ! -e /etc/rc.d/S21zapret ] && ! pidof nfqws >/dev/null 2>&1 && ! pidof tpws >/dev/null 2>&1; then
 		return 0
 	fi
+	# 先给 zapret 漏掉的在线会话补齐规则（幂等），再做总量校核
+	zapret_fill_missing_devices
 	online=$(online_wan_count)
 	[ "$online" -gt 0 ] || return 0
 	want=$((online * 4))
 	have=$(zapret_rule_count)
-	[ "$have" -ge "$want" ] && return 0
-	log_msg "SNI 分流规则缺失：期望 $want 条（在线会话 $online × 4），实际 $have 条，重装中"
+	[ "$have" -ge "$want" ] && { rm -f "$ZAPRET_RULES_STATE"; return 0; }
+	# zapret 只给**它能发现的 WAN** 装规则（它读 netifd 的 ubus 路由信息枚举出口）：实测 6 条
+	# 会话只装出 20 条 = 5 台设备（wan..wan5，缺 wan7）。所以 have < 会话数×4 未必是真缺失。
+	# 自适应退避：上次重装后数量没增加 => 这就是 zapret 能给的上限，静默 600s 再考虑，
+	# 否则每轮巡检都会 stop_fw/start_fw（刷日志 + 抖动规则）。
+	last_have=0
+	last_ts=0
+	if [ -r "$ZAPRET_RULES_STATE" ]; then
+		IFS='|' read -r last_have last_ts < "$ZAPRET_RULES_STATE"
+	fi
+	case "$last_have" in ''|*[!0-9]*) last_have=0 ;; esac
+	case "$last_ts" in ''|*[!0-9]*) last_ts=0 ;; esac
+	if [ "$have" -le "$last_have" ] && [ $(( $(date +%s) - last_ts )) -lt 600 ]; then
+		return 0
+	fi
+	log_msg "zapret-watchdog: rules below expectation have=$have want=$want online=$online, reinstalling"
 	/etc/init.d/zapret stop_fw >/dev/null 2>&1
 	sleep 1
 	/etc/init.d/zapret start_fw >/dev/null 2>&1
-	log_msg "SNI 分流规则重装完成：$have -> $(zapret_rule_count) 条"
+	now_have=$(zapret_rule_count)
+	printf '%s|%s\n' "$now_have" "$(date +%s)" > "$ZAPRET_RULES_STATE"
+	if [ "$now_have" -gt "$have" ]; then
+		log_msg "zapret-watchdog: rules restored $have -> $now_have (want $want)"
+	else
+		log_msg "zapret-watchdog: zapret caps at $now_have rules (want $want online $online); backoff 600s"
+	fi
 }
 pool_maintain_once() {
 	# 先补 SNI 分流规则（池子重拨会把它们摘掉，见 ensure_zapret_rules）
@@ -1773,7 +1923,8 @@ pool_maintain_once() {
 	i=1
 	while [ "$i" -le "$POOL_SIZE" ]; do
 		[ "$STOP_REQUESTED" -eq 0 ] && [ "$RUNNING" -eq 1 ] || return 0
-		[ "$i" -eq 1 ] && sname=$WAN_INTERFACE || sname="wan$i"
+		sname=$(slot_iface_name "$i")
+		ensure_zapret_rules
 		session_init "$sname"
 		load_session_credentials "$sname" || {
 			session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "up=0" "terminal=1" "error=$LAST_ERROR"
@@ -1809,6 +1960,7 @@ pool_maintain_once() {
 			if run_session_lifecycle "$sname"; then
 				session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "verified=1" "up=1" "terminal=0" "error="
 				record_session_result "$sname" success
+			mwan3_restore "$sname"
 			else
 				session_mark "$sname" "state=failed" "dial_state=up" "detection_state=failed" "usable=1" "verified=0" "up=1" "terminal=0" "error=检测未通过"
 				record_session_result "$sname" failure
@@ -1837,6 +1989,12 @@ pool_maintain_once() {
 			i=$((i + 1)); continue
 		fi
 		log_msg "[$sname] 轮到本会话重拨（state=$state verified=$verified）"
+		# busy-suspend 必须挡在**重拨之前**：把正在跑流量的会话拉断，代价是所有钉在它上面的连接
+		# 一起断（含 DNS 查询），观感就是「路由器短暂失去网络」。阈值由 busy_threshold_kbytes 控制。
+		if session_busy "$sname"; then
+			log_msg "[$sname] 出口正在跑流量，本轮推迟重拨"
+			i=$((i + 1)); continue
+		fi
 		load_session_credentials "$sname" || {
 		session_mark "$sname" "state=failed" "dial_state=down" "detection_state=failed" "usable=0" "terminal=1" "error=$LAST_ERROR"
 			write_status
@@ -1853,8 +2011,8 @@ pool_maintain_once() {
 		write_status
 		wait_for_up_name "$sname" 60 || { mwan3_restore "$sname"
 			session_mark "$sname" "state=down" "dial_state=down" "detection_state=waiting" "usable=0" "up=0"; write_status; i=$((i + 1)); continue; }
-		mwan3_restore "$sname"
 		session_mark "$sname" "state=up" "dial_state=up" "detection_state=testing" "usable=1" "up=1"
+		# 注意：这里不恢复 mwan3 —— 验证失败的会话保持排空，验证通过后才放回（见 success 分支）
 		# Let the fresh PPPoE session settle before testing (BRAS/DNS need a
 		# moment right after authentication).
 		wait_seconds "$SETTLE_SECONDS" || return 0
@@ -1868,6 +2026,7 @@ pool_maintain_once() {
 		if run_session_lifecycle "$sname"; then
 			session_mark "$sname" "state=success" "dial_state=up" "detection_state=passed" "usable=1" "verified=1" "up=1" "terminal=0" "error="
 			record_session_result "$sname" success
+			mwan3_restore "$sname"
 			log_msg "[$sname] 检测通过（成功连接 $(pool_success_count)/$POOL_SIZE）"
 		else
 			session_mark "$sname" "state=failed" "dial_state=up" "detection_state=failed" "usable=1" "verified=0" "up=1" "terminal=0" "error=检测未通过"
@@ -2075,6 +2234,19 @@ while :; do
 			tmp=$(atomic_tmp "$STATUS_FILE.done")
 			sed 's/"running":true/"running":false/' "$STATUS_FILE" > "$tmp" && mv -f "$tmp" "$STATUS_FILE"
 		fi
+	fi
+	sample_traffic_tick=$(( ${sample_traffic_tick:-0} + 1 ))
+	if [ "$sample_traffic_tick" -ge 3 ]; then
+		sample_traffic_tick=0
+		sample_traffic_all
+	fi
+	# 每 5 秒重写一次 status.json（面板读的就是它，所以速率才是 ~3 秒均值）。
+	# 注意**不能**再加 RUNNING 条件：池子空闲时 RUNNING=0，status.json 就不再刷新，
+	# 面板会一直显示最后一轮算出的旧速率（实测卡死不变）。
+	status_tick=$(( ${status_tick:-0} + 1 ))
+	if [ "$status_tick" -ge 5 ]; then
+		status_tick=0
+		write_status
 	fi
 	sleep 1
 done

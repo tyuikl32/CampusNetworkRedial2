@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-campus-redial
-PKG_VERSION:=1.0.0
+PKG_VERSION:=1.0.1
 PKG_RELEASE:=1
 # 许可全文在仓库根的 LICENSE（SDK 构建时包目录会被单独复制，所以这里不引用文件路径）
 PKG_LICENSE:=GPL-2.0
