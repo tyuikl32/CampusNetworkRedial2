@@ -662,13 +662,52 @@ session_busy() {
 	[ "$delta" -gt $((BUSY_KBYTES * 1024)) ]
 }
 
+# 探针的判定规则（必须与 PC 侧 C# `ProbeClient` 和 PowerShell `Test-CampusExit.ps1` 一致）：
+#   只要**收到了 HTTP 响应**就算通过 —— 200/302/404/500 一律算成功；
+#   只有超时、连不上、DNS/TLS 失败才算失败（那才是"没探到好出口"，应当继续重拨）。
+# 理由：探针测的是"这个出口能不能把请求送到目标"，不是"目标页面是否存在"。
+# 两个取数后端对"非 2xx"的返回值语义不同，必须在 bound_fetch 里各自归一化：
+#   curl          ⇒ 默认不因状态码报错，404 时退出码 0（不跟随重定向，能报状态码）
+#   uclient-fetch ⇒ wget 语义，4xx/5xx 退出码 8；**且会跟随重定向**，
+#                   所以"跟到下一跳才失败"要靠 curl 复核才能与"真连不上"区分开
+FETCH_HTTP_ERROR_RC=8
+
 bound_fetch() {
 	iface=$1; shift
 	source=$(ip -4 -o addr show dev "$iface" 2>/dev/null | awk 'NR == 1 { split($4, address, "/"); print address[1]; exit }')
 	if [ -r "$BIND_LIBRARY" ]; then
 		CAMPUS_REDIAL_DEVICE="$iface" CAMPUS_REDIAL_SOURCE="$source" \
 			LD_PRELOAD="$BIND_LIBRARY" uclient-fetch "$@"
-		return $?
+		fetch_rc=$?
+		# 8 = 服务器回了错误码（4xx/5xx）= 出口是通的，按成功处理，
+		# 否则探针地址一旦返回 404 就会被误判成坏出口，导致池子无限重拨。
+		[ "$fetch_rc" -eq "$FETCH_HTTP_ERROR_RC" ] && fetch_rc=0
+		[ "$fetch_rc" -eq 0 ] && return 0
+		# uclient-fetch 会**跟随重定向**（没有关掉的开关），于是"退出码非 0"里混着两类：
+		#   (a) 根本没连上（超时 / TLS 失败）      → 真的坏出口，应当失败
+		#   (b) 先拿到了响应（如 302），跟到下一跳才失败 → 出口是通的，应当成功
+		# 它自己分不清，所以失败时用 curl 复核一次（curl 不跟随重定向，能报出状态码）。
+		# 代价：只在"看起来失败"时多一次请求；正常出口走不到这里。
+		probe_url=
+		for fetch_arg in "$@"; do
+			case "$fetch_arg" in
+				-*) ;;
+				*) probe_url=$fetch_arg ;;
+			esac
+		done
+		if [ -n "$probe_url" ] && command -v curl >/dev/null 2>&1; then
+			if [ -n "$source" ]; then
+				fetch_code=$(curl -sS -4 --interface "$source" --max-time "$TIMEOUT_SECONDS" \
+					-o /dev/null -w '%{http_code}' "$probe_url" 2>/dev/null)
+			else
+				fetch_code=$(curl -sS -4 --max-time "$TIMEOUT_SECONDS" \
+					-o /dev/null -w '%{http_code}' "$probe_url" 2>/dev/null)
+			fi
+			case "$fetch_code" in
+				[1-5][0-9][0-9]) return 0 ;;   # 确实收到过响应 ⇒ 出口是通的
+			esac
+		fi
+		return $fetch_rc
 	fi
 	# OpenWrt 21.02 development installs have no prebuilt helper; curl binds
 	# the request itself. PPP devices reject SO_BINDTODEVICE, so bind to the
@@ -692,12 +731,18 @@ bound_fetch() {
 			pppoe-*|ppp-*) bind_arg=$source ;;
 			*) bind_arg=$iface ;;
 		esac
+		# 取回 HTTP 状态码：curl 默认不因状态码报错（404 ⇒ 退出码 0），但要覆盖
+		# "已经收到响应、随后连接卡住"的情况（那时退出码会是 28/18，而状态码有效）。
 		if [ -n "$bind_arg" ]; then
-			curl -sS -4 --interface "$bind_arg" $time_arg -o "$outfile" "$url" >/dev/null 2>&1
+			fetch_code=$(curl -sS -4 --interface "$bind_arg" $time_arg -o "$outfile" -w '%{http_code}' "$url" 2>/dev/null)
 		else
-			curl -sS -4 $time_arg -o "$outfile" "$url" >/dev/null 2>&1
+			fetch_code=$(curl -sS -4 $time_arg -o "$outfile" -w '%{http_code}' "$url" 2>/dev/null)
 		fi
-		return $?
+		fetch_rc=$?
+		case "$fetch_code" in
+			[1-5][0-9][0-9]) return 0 ;;   # 任何 HTTP 响应都算"打通"（见探针判定规则）
+		esac
+		return $fetch_rc
 	fi
 	return 125
 }
